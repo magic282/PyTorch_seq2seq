@@ -165,7 +165,7 @@ def evalModel(model, translator, evalData):
     with open('dev.out.{0}'.format(evalModelCount), 'w', encoding='utf-8') as of:
         for p in predict:
             of.write(p + '\n')
-    return scores[1]['f']
+    return scores['rouge-2']['f'][0]
 
 
 def trainModel(model, translator, trainData, validData, dataset, optim):
