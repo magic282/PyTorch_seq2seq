@@ -20,7 +20,7 @@ class MaxOut(nn.Module):
         output_size.append(self.pool_size)
         last_dim = len(output_size) - 1
         input = input.view(*output_size)
-        input, idx = input.max(last_dim)
+        input, idx = input.max(last_dim, keepdim=True)
         output = input.squeeze(last_dim)
 
         return output
