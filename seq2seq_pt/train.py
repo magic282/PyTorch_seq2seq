@@ -228,9 +228,9 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
                      report_num_correct / report_tgt_words * 100,
                      report_loss,
                      report_tgt_words,
-                     math.exp(report_loss / report_tgt_words),
-                     report_src_words / (time.time() - start),
-                     report_tgt_words / (time.time() - start),
+                     math.exp(min((report_loss / report_tgt_words), 16)),
+                     report_src_words / max((time.time() - start), 1.0),
+                     report_tgt_words / max((time.time() - start), 1.0),
                      time.time() - start))
 
                 report_loss = report_tgt_words = report_src_words = report_num_correct = 0

@@ -23,6 +23,7 @@ python train.py -data na \
        -gpus 0 \
        -curriculum 0 -extra_shuffle \
        -start_eval_batch 15000 -eval_per_batch 1500 \
-       -seed 12345 -cuda_seed 12345
+       -seed 12345 -cuda_seed 12345 \
+       -log_interval 100
 
 #umount /mnt
