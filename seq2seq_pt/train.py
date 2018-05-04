@@ -64,10 +64,6 @@ def NMTCriterion(vocabSize):
 
 
 def loss_function(g_outputs, g_targets, generator, crit, eval=False):
-    # compute generations one piece at a time
-    num_correct, report_loss = 0, 0
-    # outputs = Variable(outputs.data, requires_grad=(not eval), volatile=eval)
-
     batch_size = g_outputs.size(1)
 
     g_out_t = g_outputs.view(-1, g_outputs.size(2))
@@ -75,25 +71,7 @@ def loss_function(g_outputs, g_targets, generator, crit, eval=False):
 
     g_loss = crit(g_prob_t, g_targets.view(-1))
     total_loss = g_loss
-    report_loss = total_loss.data[0]
-    # if not eval:
-    #     total_loss = total_loss / batch_size
-
-    # TODO: fix predict count
-    # g_predict = g_prob_t.data.max(2)[1].squeeze(2)
-    # c_predict = c_outputs.data.max(2)[1].squeeze(2)
-    # g_correct = g_predict.eq(g_targets.data).sum()
-
-    # ipdb.set_trace()
-
-    # g_correct = g_predict.data.eq(g_targets.data).masked_select(g_targets.ne(s2s.Constants.PAD).data)
-    # g_correct = g_correct * (1 - c_switch)
-
-    # num_correct_t = pred_t.data.eq(g_targets.data).masked_select(g_targets.ne(s2s.Constants.PAD).data).sum()
-    # num_correct += num_correct_t
-
-    # grad_output = None if outputs.grad is None else outputs.grad.data
-    # return loss, grad_output, num_correct
+    report_loss = total_loss.item()
     return total_loss, report_loss, 0
 
 
@@ -234,7 +212,7 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
             loss.backward()
             optim.step()
 
-            num_words = targets.data.ne(s2s.Constants.PAD).sum()
+            num_words = targets.data.ne(s2s.Constants.PAD).sum().item()
             report_loss += res_loss
             report_num_correct += num_correct
             report_tgt_words += num_words
@@ -320,7 +298,7 @@ def main():
 
     generator = nn.Sequential(
         nn.Linear(opt.dec_rnn_size // opt.maxout_pool_size, dicts['tgt'].size()),  # TODO: fix here
-        nn.LogSoftmax())
+        nn.LogSoftmax(dim=1))
 
     model = s2s.Models.NMTModel(encoder, decoder, decIniter)
     model.generator = generator
@@ -360,8 +338,7 @@ def main():
                 # p.data.zero_()
                 p.data.normal_(0, math.sqrt(6 / (1 + p.size(0))))
             else:
-                xavier_normal(p, math.sqrt(3))
-                # xavier_uniform(p)
+                nn.init.xavier_normal_(p, math.sqrt(3))
 
         encoder.load_pretrained_vectors(opt)
         decoder.load_pretrained_vectors(opt)

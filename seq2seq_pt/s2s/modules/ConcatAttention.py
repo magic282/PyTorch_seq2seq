@@ -16,7 +16,7 @@ class ConcatAttention(nn.Module):
         self.linear_pre = nn.Linear(attend_dim, att_dim, bias=True)
         self.linear_q = nn.Linear(query_dim, att_dim, bias=False)
         self.linear_v = nn.Linear(att_dim, 1, bias=False)
-        self.sm = nn.Softmax()
+        self.sm = nn.Softmax(dim=1)
         self.tanh = nn.Tanh()
         self.mask = None
 
