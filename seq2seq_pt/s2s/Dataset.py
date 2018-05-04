@@ -17,7 +17,7 @@ class Dataset(object):
             assert (len(self.src) == len(self.tgt))
         else:
             self.tgt = None
-        self.cuda = cuda
+        self.device = torch.device("cuda" if cuda else "cpu")
 
         self.batchSize = batchSize
         self.numBatches = math.ceil(len(self.src) / batchSize)
@@ -66,14 +66,11 @@ class Dataset(object):
             if b is None:
                 return b
             b = torch.stack(b, 0).t().contiguous()
-            if self.cuda:
-                b = b.cuda()
-            b = Variable(b, volatile=self.volatile)
+            b = b.to(self.device)
             return b
 
         # wrap lengths in a Variable to properly split it in DataParallel
         lengths = torch.LongTensor(lengths).view(1, -1)
-        lengths = Variable(lengths, volatile=self.volatile)
 
         return (wrap(srcBatch), lengths), (wrap(tgtBatch),), indices
 
