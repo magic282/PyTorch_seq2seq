@@ -115,12 +115,13 @@ rouge_calculator = Rouge.Rouge()
 
 
 def evalModel(model, translator, evalData):
-    ofn = 'dev.out.{0}'.format(evalModelCount)
-    if opt.save_path:
-        ofn = os.path.join(opt.save_path, ofn)
     global evalModelCount
     global rouge_calculator
     evalModelCount += 1
+    ofn = 'dev.out.{0}'.format(evalModelCount)
+    if opt.save_path:
+        ofn = os.path.join(opt.save_path, ofn)
+
     predict, gold = [], []
     processed_data, raw_data = evalData
     for batch, raw_batch in zip(processed_data, raw_data):
