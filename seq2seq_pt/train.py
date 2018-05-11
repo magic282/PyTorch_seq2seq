@@ -115,6 +115,9 @@ rouge_calculator = Rouge.Rouge()
 
 
 def evalModel(model, translator, evalData):
+    ofn = 'dev.out.{0}'.format(evalModelCount)
+    if opt.save_path:
+        ofn = os.path.join(opt.save_path, ofn)
     global evalModelCount
     global rouge_calculator
     evalModelCount += 1
@@ -141,7 +144,8 @@ def evalModel(model, translator, evalData):
         gold += [' '.join(r) for r in tgt_batch]
         predict += [' '.join(sents) for sents in predBatch]
     scores = rouge_calculator.compute_rouge(gold, predict)
-    with open('dev.out.{0}'.format(evalModelCount), 'w', encoding='utf-8') as of:
+
+    with open(ofn, 'w', encoding='utf-8') as of:
         for p in predict:
             of.write(p + '\n')
     return scores['rouge-2']['f'][0]
@@ -264,15 +268,11 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
 
 
 def main():
-    logger.info("Loading data from '%s'" % opt.data)
-    if not opt.online_process_data:
-        dataset = torch.load(opt.data)
-    else:
-        import onlinePreprocess
-        onlinePreprocess.seq_length = opt.max_sent_length
-        onlinePreprocess.shuffle = 1 if opt.process_shuffle else 0
-        from onlinePreprocess import prepare_data_online
-        dataset = prepare_data_online(opt.train_src, opt.src_vocab, opt.train_tgt, opt.tgt_vocab)
+    import onlinePreprocess
+    onlinePreprocess.seq_length = opt.max_sent_length
+    onlinePreprocess.shuffle = 1 if opt.process_shuffle else 0
+    from onlinePreprocess import prepare_data_online
+    dataset = prepare_data_online(opt.train_src, opt.src_vocab, opt.train_tgt, opt.tgt_vocab)
 
     dict_checkpoint = opt.train_from if opt.train_from else opt.train_from_state_dict
     if dict_checkpoint:

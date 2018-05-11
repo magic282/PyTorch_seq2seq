@@ -69,10 +69,11 @@ class Translator(object):
                                                   s2s.Constants.BOS_WORD,
                                                   s2s.Constants.EOS_WORD) for b in goldBatch]
 
-        return s2s.Dataset(srcData, tgtData, self.opt.batch_size, self.opt.cuda, volatile=True)
+        return s2s.Dataset(srcData, tgtData, self.opt.batch_size, self.opt.cuda)
 
     def buildTargetTokens(self, pred, src, attn):
-        tokens = self.tgt_dict.convertToLabels(pred, s2s.Constants.EOS)
+        pred_word_ids = [x.item() for x in pred]
+        tokens = self.tgt_dict.convertToLabels(pred_word_ids, s2s.Constants.EOS)
         tokens = tokens[:-1]  # EOS
         if self.opt.replace_unk:
             for i in range(len(tokens)):
@@ -94,12 +95,10 @@ class Translator(object):
         #  (3) run the decoder to generate sentences, using beam search
 
         # Expand tensors for each beam.
-        context = Variable(context.data.repeat(1, beamSize, 1))
-        decStates = Variable(decStates.unsqueeze(0).data.repeat(1, beamSize, 1))
+        context = context.data.repeat(1, beamSize, 1)
+        decStates = decStates.unsqueeze(0).data.repeat(1, beamSize, 1)
         att_vec = self.model.make_init_att(context)
-        padMask = Variable(
-            srcBatch.data.eq(s2s.Constants.PAD).transpose(0, 1).unsqueeze(0).repeat(beamSize, 1, 1).float(),
-            volatile=True)
+        padMask = srcBatch.data.eq(s2s.Constants.PAD).transpose(0, 1).unsqueeze(0).repeat(beamSize, 1, 1).float()
 
         beam = [s2s.Beam(beamSize, self.opt.cuda) for k in range(batchSize)]
         batchIdx = list(range(batchSize))
@@ -109,8 +108,8 @@ class Translator(object):
             # Prepare decoder input.
             input = torch.stack([b.getCurrentState() for b in beam
                                  if not b.done]).transpose(0, 1).contiguous().view(1, -1)
-            g_outputs, decStates, attn, att_vec = self.model.decoder(
-                Variable(input, volatile=True), decStates, context, padMask.view(-1, padMask.size(2)), att_vec)
+            g_outputs, decStates, attn, att_vec = self.model.decoder(input, decStates, context,
+                                                                     padMask.view(-1, padMask.size(2)), att_vec)
 
             # g_outputs: 1 x (beam*batch) x numWords
             g_outputs = g_outputs.squeeze(0)
@@ -149,17 +148,15 @@ class Translator(object):
                 view = t.data.view(-1, remainingSents, rnnSize)
                 newSize = list(t.size())
                 newSize[-2] = newSize[-2] * len(activeIdx) // remainingSents
-                return Variable(view.index_select(1, activeIdx) \
-                                .view(*newSize), volatile=True)
+                return view.index_select(1, activeIdx).view(*newSize)
 
             decStates = updateActive(decStates, self.dec_rnn_size)
             context = updateActive(context, self.enc_rnn_size)
             att_vec = updateActive(att_vec, self.enc_rnn_size)
-            padMask = padMask.index_select(1, Variable(activeIdx, volatile=True))
+            padMask = padMask.index_select(1, activeIdx)
 
             # set correct state for beam search
             previous_index = torch.stack(real_father_idx).transpose(0, 1).contiguous()
-            previous_index = Variable(previous_index, volatile=True)
             decStates = decStates.view(-1, decStates.size(2)).index_select(0, previous_index.view(-1)).view(
                 *decStates.size())
             att_vec = att_vec.view(-1, att_vec.size(1)).index_select(0, previous_index.view(-1)).view(*att_vec.size())

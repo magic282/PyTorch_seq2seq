@@ -7,6 +7,7 @@ try:
 except ImportError:
     pass
 
+
 class ConcatAttention(nn.Module):
     def __init__(self, attend_dim, query_dim, att_dim):
         super(ConcatAttention, self).__init__()
@@ -47,8 +48,12 @@ class ConcatAttention(nn.Module):
 
         return weightedContext, score, precompute
 
-    def __repr__(self):
+    def extra_repr(self):
         return self.__class__.__name__ + '(' + str(self.att_dim) + ' * ' + '(' \
                + str(self.attend_dim) + '->' + str(self.att_dim) + ' + ' \
                + str(self.query_dim) + '->' + str(self.att_dim) + ')' + ')'
 
+    def __repr__(self):
+        return self.__class__.__name__ + '(' + str(self.att_dim) + ' * ' + '(' \
+               + str(self.attend_dim) + '->' + str(self.att_dim) + ' + ' \
+               + str(self.query_dim) + '->' + str(self.att_dim) + ')' + ')'

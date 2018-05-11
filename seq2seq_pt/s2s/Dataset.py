@@ -10,7 +10,7 @@ import s2s
 
 
 class Dataset(object):
-    def __init__(self, srcData, tgtData, batchSize, cuda, volatile=False):
+    def __init__(self, srcData, tgtData, batchSize, cuda):
         self.src = srcData
         if tgtData:
             self.tgt = tgtData
@@ -21,7 +21,6 @@ class Dataset(object):
 
         self.batchSize = batchSize
         self.numBatches = math.ceil(len(self.src) / batchSize)
-        self.volatile = volatile
 
     def _batchify(self, data, align_right=False, include_lengths=False):
         lengths = [x.size(0) for x in data]

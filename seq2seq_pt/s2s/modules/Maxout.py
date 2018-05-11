@@ -25,5 +25,8 @@ class MaxOut(nn.Module):
 
         return output
 
+    def extra_repr(self):
+        return self.__class__.__name__ + '({0})'.format(self.pool_size)
+
     def __repr__(self):
         return self.__class__.__name__ + '({0})'.format(self.pool_size)
