@@ -69,12 +69,19 @@ class Translator(object):
                                                   s2s.Constants.BOS_WORD,
                                                   s2s.Constants.EOS_WORD) for b in goldBatch]
 
-        return s2s.Dataset(srcData, tgtData, self.opt.batch_size, self.opt.cuda)
+        return s2s.Dataset(srcData, tgtData, None, None, self.opt.batch_size, self.opt.cuda)
 
-    def buildTargetTokens(self, pred, src, attn):
+    def buildTargetTokens(self, pred, src, isCopy, copyPosition, attn):
         pred_word_ids = [x.item() for x in pred]
         tokens = self.tgt_dict.convertToLabels(pred_word_ids, s2s.Constants.EOS)
         tokens = tokens[:-1]  # EOS
+        copied = False
+        for i in range(len(tokens)):
+            if isCopy[i]:
+                tokens[i] = '[[{0}]]'.format(src[copyPosition[i] - self.tgt_dict.size()])
+                copied = True
+        if copied:
+            self.copyCount += 1
         if self.opt.replace_unk:
             for i in range(len(tokens)):
                 if tokens[i] == s2s.Constants.UNK_WORD:
@@ -108,15 +115,20 @@ class Translator(object):
             # Prepare decoder input.
             input = torch.stack([b.getCurrentState() for b in beam
                                  if not b.done]).transpose(0, 1).contiguous().view(1, -1)
-            g_outputs, decStates, attn, att_vec = self.model.decoder(input, decStates, context,
-                                                                     padMask.view(-1, padMask.size(2)), att_vec)
+            g_outputs, c_outputs, copyGateOutputs, decStates, attn, att_vec = \
+                self.model.decoder(input, decStates, context, padMask.view(-1, padMask.size(2)), att_vec)
 
             # g_outputs: 1 x (beam*batch) x numWords
+            copyGateOutputs = copyGateOutputs.view(-1, 1)
             g_outputs = g_outputs.squeeze(0)
-            g_out_prob = self.model.generator.forward(g_outputs)
+            g_out_prob = self.model.generator.forward(g_outputs) + 1e-8
+            g_predict = torch.log(g_out_prob * ((1 - copyGateOutputs).expand_as(g_out_prob)))
+            c_outputs = c_outputs.squeeze(0) + 1e-8
+            c_predict = torch.log(c_outputs * (copyGateOutputs.expand_as(c_outputs)))
 
             # batch x beam x numWords
-            wordLk = g_out_prob.view(beamSize, remainingSents, -1).transpose(0, 1).contiguous()
+            wordLk = g_predict.view(beamSize, remainingSents, -1).transpose(0, 1).contiguous()
+            copyLk = c_predict.view(beamSize, remainingSents, -1).transpose(0, 1).contiguous()
             attn = attn.view(beamSize, remainingSents, -1).transpose(0, 1).contiguous()
 
             active = []
@@ -126,7 +138,7 @@ class Translator(object):
                     continue
 
                 idx = batchIdx[b]
-                if not beam[b].advance(wordLk.data[idx], attn.data[idx]):
+                if not beam[b].advance(wordLk.data[idx], copyLk.data[idx], attn.data[idx]):
                     active += [b]
                     father_idx.append(beam[b].prevKs[-1])  # this is very annoying
 
@@ -165,6 +177,7 @@ class Translator(object):
 
         # (4) package everything up
         allHyp, allScores, allAttn = [], [], []
+        allIsCopy, allCopyPosition = [], []
         n_best = self.opt.n_best
 
         for b in range(batchSize):
@@ -172,12 +185,14 @@ class Translator(object):
 
             allScores += [scores[:n_best]]
             valid_attn = srcBatch.data[:, b].ne(s2s.Constants.PAD).nonzero().squeeze(1)
-            hyps, attn = zip(*[beam[b].getHyp(k) for k in ks[:n_best]])
+            hyps, isCopy, copyPosition, attn = zip(*[beam[b].getHyp(k) for k in ks[:n_best]])
             attn = [a.index_select(1, valid_attn) for a in attn]
             allHyp += [hyps]
             allAttn += [attn]
+            allIsCopy += [isCopy]
+            allCopyPosition += [copyPosition]
 
-        return allHyp, allScores, allAttn, None
+        return allHyp, allScores, allIsCopy, allCopyPosition, allAttn, None
 
     def translate(self, srcBatch, goldBatch):
         #  (1) convert words to indexes
@@ -186,16 +201,16 @@ class Translator(object):
         src, tgt, indices = dataset[0]
 
         #  (2) translate
-        pred, predScore, attn, _ = self.translateBatch(src, tgt)
-        pred, predScore, attn = list(zip(
-            *sorted(zip(pred, predScore, attn, indices),
+        pred, predScore, predIsCopy, predCopyPosition, attn, _ = self.translateBatch(src, tgt)
+        pred, predScore, predIsCopy, predCopyPosition, attn = list(zip(
+            *sorted(zip(pred, predScore, predIsCopy, predCopyPosition, attn, indices),
                     key=lambda x: x[-1])))[:-1]
 
         #  (3) convert indexes to words
         predBatch = []
         for b in range(src[0].size(1)):
             predBatch.append(
-                [self.buildTargetTokens(pred[b][n], srcBatch[b], attn[b][n])
+                [self.buildTargetTokens(pred[b][n], srcBatch[b], predIsCopy[b][n], predCopyPosition[b][n], attn[b][n])
                  for n in range(self.opt.n_best)]
             )
 

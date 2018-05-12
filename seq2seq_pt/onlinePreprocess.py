@@ -58,6 +58,7 @@ def saveVocabulary(name, vocab, file):
 
 def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
     src, tgt = [], []
+    switch, c_tgt = [], []
     sizes = []
     count, ignored = 0, 0
 
@@ -96,6 +97,17 @@ def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
                                           s2s.Constants.UNK_WORD,
                                           s2s.Constants.BOS_WORD,
                                           s2s.Constants.EOS_WORD)]
+            switch_buf = [0] * (len(tgtWords) + 2)
+            c_tgt_buf = [0] * (len(tgtWords) + 2)
+            for idx, tgt_word in enumerate(tgtWords):
+                word_id = tgtDicts.lookup(tgt_word, None)
+                if word_id is None:
+                    if tgt_word in srcWords:
+                        copy_position = srcWords.index(tgt_word)
+                        switch_buf[idx + 1] = 1
+                        c_tgt_buf[idx + 1] = copy_position
+            switch.append(torch.FloatTensor(switch_buf))
+            c_tgt.append(torch.LongTensor(c_tgt_buf))
 
             sizes += [len(srcWords)]
         else:
@@ -114,16 +126,20 @@ def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
         perm = torch.randperm(len(src))
         src = [src[idx] for idx in perm]
         tgt = [tgt[idx] for idx in perm]
+        switch = [switch[idx] for idx in perm]
+        c_tgt = [c_tgt[idx] for idx in perm]
         sizes = [sizes[idx] for idx in perm]
 
     logger.info('... sorting sentences by size')
     _, perm = torch.sort(torch.Tensor(sizes))
     src = [src[idx] for idx in perm]
     tgt = [tgt[idx] for idx in perm]
+    switch = [switch[idx] for idx in perm]
+    c_tgt = [c_tgt[idx] for idx in perm]
 
     logger.info('Prepared %d sentences (%d ignored due to length == 0 or > %d)' %
                 (len(src), ignored, seq_length))
-    return src, tgt
+    return src, tgt, switch, c_tgt
 
 
 def prepare_data_online(train_src, src_vocab, train_tgt, tgt_vocab):
@@ -133,10 +149,10 @@ def prepare_data_online(train_src, src_vocab, train_tgt, tgt_vocab):
 
     logger.info('Preparing training ...')
     train = {}
-    train['src'], train['tgt'] = makeData(train_src,
-                                          train_tgt,
-                                          dicts['src'],
-                                          dicts['tgt'])
+    train['src'], train['tgt'], train['switch'], train['c_tgt'] = makeData(train_src,
+                                                                           train_tgt,
+                                                                           dicts['src'],
+                                                                           dicts['tgt'])
 
     dataset = {'dicts': dicts,
                'train': train,

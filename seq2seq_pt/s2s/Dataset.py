@@ -10,10 +10,14 @@ import s2s
 
 
 class Dataset(object):
-    def __init__(self, srcData, tgtData, batchSize, cuda):
+    def __init__(self, srcData, tgtData, copySwitchData, copyTgtData,
+                 batchSize, cuda):
         self.src = srcData
         if tgtData:
             self.tgt = tgtData
+            # copy switch should company tgt label
+            self.copySwitch = copySwitchData
+            self.copyTgt = copyTgtData
             assert (len(self.src) == len(self.tgt))
         else:
             self.tgt = None
@@ -45,21 +49,37 @@ class Dataset(object):
         if self.tgt:
             tgtBatch = self._batchify(
                 self.tgt[index * self.batchSize:(index + 1) * self.batchSize])
+
         else:
             tgtBatch = None
+
+        if self.copySwitch is not None:
+            copySwitchBatch = self._batchify(
+                self.copySwitch[index * self.batchSize:(index + 1) * self.batchSize])
+            copyTgtBatch = self._batchify(
+                self.copyTgt[index * self.batchSize:(index + 1) * self.batchSize])
+        else:
+            copySwitchBatch = None
+            copyTgtBatch = None
 
         # within batch sorting by decreasing length for variable length rnns
         indices = range(len(srcBatch))
         if tgtBatch is None:
             batch = zip(indices, srcBatch)
         else:
-            batch = zip(indices, srcBatch, tgtBatch)
+            if self.copySwitch is not None:
+                batch = zip(indices, srcBatch, tgtBatch, copySwitchBatch, copyTgtBatch)
+            else:
+                batch = zip(indices, srcBatch, tgtBatch)
         # batch = zip(indices, srcBatch) if tgtBatch is None else zip(indices, srcBatch, tgtBatch)
         batch, lengths = zip(*sorted(zip(batch, lengths), key=lambda x: -x[1]))
         if tgtBatch is None:
             indices, srcBatch = zip(*batch)
         else:
-            indices, srcBatch, tgtBatch = zip(*batch)
+            if self.copySwitch is not None:
+                indices, srcBatch, tgtBatch, copySwitchBatch, copyTgtBatch = zip(*batch)
+            else:
+                indices, srcBatch, tgtBatch = zip(*batch)
 
         def wrap(b):
             if b is None:
@@ -71,11 +91,15 @@ class Dataset(object):
         # wrap lengths in a Variable to properly split it in DataParallel
         lengths = torch.LongTensor(lengths).view(1, -1)
 
-        return (wrap(srcBatch), lengths), (wrap(tgtBatch),), indices
+        return (wrap(srcBatch), lengths), \
+               (wrap(tgtBatch), wrap(copySwitchBatch), wrap(copyTgtBatch)), \
+               indices
 
     def __len__(self):
         return self.numBatches
 
     def shuffle(self):
-        data = list(zip(self.src, self.tgt))
-        self.src, self.tgt = zip(*[data[i] for i in torch.randperm(len(data))])
+        data = list(
+            zip(self.src, self.tgt, self.copySwitch, self.copyTgt))
+        self.src, self.tgt, self.copySwitch, self.copyTgt = zip(
+            *[data[i] for i in torch.randperm(len(data))])

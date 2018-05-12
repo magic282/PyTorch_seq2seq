@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+from torch.nn import functional as F
 import s2s.modules
 from torch.nn.utils.rnn import pad_packed_sequence as unpack
 from torch.nn.utils.rnn import pack_padded_sequence as pack
@@ -92,6 +93,8 @@ class Decoder(nn.Module):
         self.maxout = s2s.modules.MaxOut(opt.maxout_pool_size)
         self.maxout_pool_size = opt.maxout_pool_size
 
+        self.copySwitch = nn.Linear(opt.enc_rnn_size + opt.dec_rnn_size, 1)
+
         self.hidden_size = opt.dec_rnn_size
 
     def load_pretrained_vectors(self, opt):
@@ -103,6 +106,8 @@ class Decoder(nn.Module):
         emb = self.word_lut(input)
 
         g_outputs = []
+        c_outputs = []
+        copyGateOutputs = []
         cur_context = init_att
         self.attn.applyMask(src_pad_mask)
         precompute = None
@@ -114,12 +119,19 @@ class Decoder(nn.Module):
             output, hidden = self.rnn(input_emb, hidden)
             cur_context, attn, precompute = self.attn(output, context.transpose(0, 1), precompute)
 
+            copyProb = self.copySwitch(torch.cat((output, cur_context), dim=1))
+            copyProb = F.sigmoid(copyProb)
+
             readout = self.readout(torch.cat((emb_t, output, cur_context), dim=1))
             maxout = self.maxout(readout)
             output = self.dropout(maxout)
             g_outputs += [output]
+            c_outputs += [attn]
+            copyGateOutputs += [copyProb]
         g_outputs = torch.stack(g_outputs)
-        return g_outputs, hidden, attn, cur_context
+        c_outputs = torch.stack(c_outputs)
+        copyGateOutputs = torch.stack(copyGateOutputs)
+        return g_outputs, c_outputs, copyGateOutputs, hidden, attn, cur_context
 
 
 class DecInit(nn.Module):
@@ -164,6 +176,7 @@ class NMTModel(nn.Module):
         init_att = self.make_init_att(context)
         enc_hidden = self.decIniter(enc_hidden[1]).unsqueeze(0)  # [1] is the last backward hiden
 
-        g_out, dec_hidden, _attn, _attention_vector = self.decoder(tgt, enc_hidden, context, src_pad_mask, init_att)
+        g_out, c_out, c_gate_out, dec_hidden, _attn, _attention_vector = self.decoder(tgt, enc_hidden, context,
+                                                                                      src_pad_mask, init_att)
 
-        return g_out
+        return g_out, c_out, c_gate_out

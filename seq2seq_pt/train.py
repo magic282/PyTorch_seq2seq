@@ -76,6 +76,33 @@ def loss_function(g_outputs, g_targets, generator, crit, eval=False):
     return total_loss, report_loss, 0
 
 
+def generate_copy_loss_function(g_outputs, c_outputs, g_targets,
+                                c_switch, c_targets, c_gate_values,
+                                generator, crit, copyCrit):
+    batch_size = g_outputs.size(1)
+
+    g_out_t = g_outputs.view(-1, g_outputs.size(2))
+    g_prob_t = generator(g_out_t)
+    g_prob_t = g_prob_t.view(-1, batch_size, g_prob_t.size(1))
+
+    c_output_prob = c_outputs * c_gate_values.expand_as(c_outputs) + 1e-8
+    g_output_prob = g_prob_t * (1 - c_gate_values).expand_as(g_prob_t) + 1e-8
+
+    c_output_prob_log = torch.log(c_output_prob)
+    g_output_prob_log = torch.log(g_output_prob)
+    c_output_prob_log = c_output_prob_log * (c_switch.unsqueeze(2).expand_as(c_output_prob_log))
+    g_output_prob_log = g_output_prob_log * ((1 - c_switch).unsqueeze(2).expand_as(g_output_prob_log))
+
+    g_output_prob_log = g_output_prob_log.view(-1, g_output_prob_log.size(2))
+    c_output_prob_log = c_output_prob_log.view(-1, c_output_prob_log.size(2))
+
+    g_loss = crit(g_output_prob_log, g_targets.view(-1))
+    c_loss = copyCrit(c_output_prob_log, c_targets.view(-1))
+    total_loss = g_loss + c_loss
+    report_loss = total_loss.item()
+    return total_loss, report_loss, 0
+
+
 def addPair(f1, f2):
     for x, y1 in zip(f1, f2):
         yield (x, y1)
@@ -130,9 +157,9 @@ def evalModel(model, translator, evalData):
         src_batch, tgt_batch = raw_batch
 
         #  (2) translate
-        pred, predScore, attn, _ = translator.translateBatch(src, tgt)
-        pred, predScore, attn = list(zip(
-            *sorted(zip(pred, predScore, attn, indices),
+        pred, predScore, predIsCopy, predCopyPosition, attn, _ = translator.translateBatch(src, tgt)
+        pred, predScore, predIsCopy, predCopyPosition, attn = list(zip(
+            *sorted(zip(pred, predScore, predIsCopy, predCopyPosition, attn, indices),
                     key=lambda x: x[-1])))[:-1]
 
         #  (3) convert indexes to words
@@ -140,11 +167,13 @@ def evalModel(model, translator, evalData):
         for b in range(src[0].size(1)):
             n = 0
             predBatch.append(
-                translator.buildTargetTokens(pred[b][n], src_batch[b], attn[b][n])
+                translator.buildTargetTokens(pred[b][n], src_batch[b],
+                                             predIsCopy[b][n], predCopyPosition[b][n], attn[b][n])
             )
         gold += [' '.join(r) for r in tgt_batch]
         predict += [' '.join(sents) for sents in predBatch]
-    scores = rouge_calculator.compute_rouge(gold, predict)
+    no_copy_mark_predict = [sent.replace('[[', '').replace(']]', '') for sent in predict]
+    scores = rouge_calculator.compute_rouge(gold, no_copy_mark_predict)
 
     with open(ofn, 'w', encoding='utf-8') as of:
         for p in predict:
@@ -159,6 +188,7 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
 
     # define criterion of each GPU
     criterion = NMTCriterion(dataset['dicts']['tgt'].size())
+    copyLossF = nn.NLLLoss(size_average=False)
 
     start_time = time.time()
 
@@ -201,15 +231,24 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
         for i in range(len(trainData)):
             global totalBatchCount
             totalBatchCount += 1
-            # (wrap(srcBatch), lengths), (wrap(tgtBatch)), indices
+            """
+            (wrap(srcBatch), lengths), \
+               (wrap(tgtBatch), wrap(copySwitchBatch), wrap(copyTgtBatch)), \
+               indices
+            """
             batchIdx = batchOrder[i] if epoch > opt.curriculum else i
             batch = trainData[batchIdx][:-1]  # exclude original indices
 
             model.zero_grad()
             # ipdb.set_trace()
-            g_outputs = model(batch)
+            g_outputs, c_outputs, c_gate_values = model(batch)
             targets = batch[1][0][1:]  # exclude <s> from targets
-            loss, res_loss, num_correct = loss_function(g_outputs, targets, model.generator, criterion)
+            copy_switch = batch[1][1][1:]
+            c_targets = batch[1][2][1:]
+            # loss, res_loss, num_correct = loss_function(g_outputs, targets, model.generator, criterion)
+            loss, res_loss, num_correct = generate_copy_loss_function(
+                g_outputs, c_outputs, targets, copy_switch, c_targets, c_gate_values, model.generator, criterion,
+                copyLossF)
 
             if math.isnan(res_loss) or res_loss > 1e20:
                 logger.info('catch NaN')
@@ -281,10 +320,9 @@ def main():
         checkpoint = torch.load(dict_checkpoint)
         dataset['dicts'] = checkpoint['dicts']
 
-    trainData = s2s.Dataset(dataset['train']['src'], dataset['train']['tgt'], opt.batch_size, opt.gpus)
-    # validData = s2s.Dataset(dataset['valid']['src'], dataset['valid']['bio'], dataset['valid']['tgt'],
-    #                          None, None, opt.batch_size, opt.gpus,
-    #                          volatile=True)
+    trainData = s2s.Dataset(dataset['train']['src'], dataset['train']['tgt'],
+                            dataset['train']['switch'], dataset['train']['c_tgt'],
+                            opt.batch_size, opt.gpus)
     dicts = dataset['dicts']
     logger.info(' * vocabulary size. source = %d; target = %d' %
                 (dicts['src'].size(), dicts['tgt'].size()))
@@ -300,7 +338,9 @@ def main():
 
     generator = nn.Sequential(
         nn.Linear(opt.dec_rnn_size // opt.maxout_pool_size, dicts['tgt'].size()),  # TODO: fix here
-        nn.LogSoftmax(dim=1))
+        # nn.LogSoftmax(dim=1)
+        nn.Softmax(dim=1)
+    )
 
     model = s2s.Models.NMTModel(encoder, decoder, decIniter)
     model.generator = generator
