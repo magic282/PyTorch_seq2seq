@@ -170,15 +170,23 @@ def evalModel(model, translator, evalData):
                 translator.buildTargetTokens(pred[b][n], src_batch[b],
                                              predIsCopy[b][n], predCopyPosition[b][n], attn[b][n])
             )
-        gold += [' '.join(r) for r in tgt_batch]
-        predict += [' '.join(sents) for sents in predBatch]
-    no_copy_mark_predict = [sent.replace('[[', '').replace(']]', '') for sent in predict]
-    scores = rouge_calculator.compute_rouge(gold, no_copy_mark_predict)
+        # gold += [' '.join(r) for r in tgt_batch]
+        # predict += [' '.join(sents) for sents in predBatch]
+        # nltk BLEU evaluator needs tokenized sentences
+        gold += [[r] for r in tgt_batch]
+        predict += predBatch
+    # no_copy_mark_predict = [sent.replace('[[', '').replace(']]', '') for sent in predict]
+    # scores = rouge_calculator.compute_rouge(gold, no_copy_mark_predict)
+
+    no_copy_mark_predict = [[word.replace('[[', '').replace(']]', '') for word in sent] for sent in predict]
+    bleu = bleu_score.corpus_bleu(gold, no_copy_mark_predict)
+    report_metric = bleu
 
     with open(ofn, 'w', encoding='utf-8') as of:
         for p in predict:
-            of.write(p + '\n')
-    return scores['rouge-2']['f'][0]
+            # of.write(p + '\n')
+            of.write(' '.join(p) + '\n')
+    return report_metric
 
 
 def trainModel(model, translator, trainData, validData, dataset, optim):
@@ -309,6 +317,7 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
 
 def main():
     import onlinePreprocess
+    onlinePreprocess.lower = opt.lower_input
     onlinePreprocess.seq_length = opt.max_sent_length
     onlinePreprocess.shuffle = 1 if opt.process_shuffle else 0
     from onlinePreprocess import prepare_data_online

@@ -26,6 +26,8 @@ def add_data_options(parser):
     parser.add_argument('-src_vocab')
     parser.add_argument('-train_tgt')
     parser.add_argument('-tgt_vocab')
+    parser.add_argument('-lower_input', action="store_true",
+                        help="Lower case all the input. Default is False")
 
     # Test options
     parser.add_argument('-dev_input_src',

@@ -21,6 +21,8 @@ class Dataset(object):
             assert (len(self.src) == len(self.tgt))
         else:
             self.tgt = None
+            self.copySwitch = None
+            self.copyTgt = None
         self.device = torch.device("cuda" if cuda else "cpu")
 
         self.batchSize = batchSize
