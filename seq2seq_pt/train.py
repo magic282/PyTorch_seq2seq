@@ -170,22 +170,23 @@ def evalModel(model, translator, evalData):
                 translator.buildTargetTokens(pred[b][n], src_batch[b],
                                              predIsCopy[b][n], predCopyPosition[b][n], attn[b][n])
             )
-        # gold += [' '.join(r) for r in tgt_batch]
-        # predict += [' '.join(sents) for sents in predBatch]
+        gold += [' '.join(r) for r in tgt_batch]
+        predict += [' '.join(sents) for sents in predBatch]
         # nltk BLEU evaluator needs tokenized sentences
-        gold += [[r] for r in tgt_batch]
-        predict += predBatch
-    # no_copy_mark_predict = [sent.replace('[[', '').replace(']]', '') for sent in predict]
-    # scores = rouge_calculator.compute_rouge(gold, no_copy_mark_predict)
+        # gold += [[r] for r in tgt_batch]
+        # predict += predBatch
+    no_copy_mark_predict = [sent.replace('[[', '').replace(']]', '') for sent in predict]
+    scores = rouge_calculator.compute_rouge(gold, no_copy_mark_predict)
+    report_metric = scores['rouge-2']['f'][0]
 
-    no_copy_mark_predict = [[word.replace('[[', '').replace(']]', '') for word in sent] for sent in predict]
-    bleu = bleu_score.corpus_bleu(gold, no_copy_mark_predict)
-    report_metric = bleu
+    # no_copy_mark_predict = [[word.replace('[[', '').replace(']]', '') for word in sent] for sent in predict]
+    # bleu = bleu_score.corpus_bleu(gold, no_copy_mark_predict)
+    # report_metric = bleu
 
     with open(ofn, 'w', encoding='utf-8') as of:
         for p in predict:
-            # of.write(p + '\n')
-            of.write(' '.join(p) + '\n')
+            of.write(p + '\n')
+            # of.write(' '.join(p) + '\n')
     return report_metric
 
 
