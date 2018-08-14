@@ -2,7 +2,13 @@ from __future__ import division
 
 import s2s
 import argparse
+import sys
+from distutils.version import LooseVersion
 import torch
+
+if LooseVersion(torch.__version__) > LooseVersion('0.3.1'):
+    print('The PyTorch version is {0}. But we only support to {1}'.format(torch.__version__, '0.3.1'))
+    sys.exit(-1)
 import torch.nn as nn
 from torch import cuda
 from torch.autograd import Variable
