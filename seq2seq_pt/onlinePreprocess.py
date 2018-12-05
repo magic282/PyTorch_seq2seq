@@ -8,7 +8,9 @@ except ImportError:
     pass
 
 lower = True
-seq_length = 100
+MAX_SRC_LENGTH = 100
+MAX_TGT_LENGTH = 100
+TRUNCATE = False
 report_every = 100000
 shuffle = 1
 
@@ -60,6 +62,7 @@ def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
     src, tgt = [], []
     sizes = []
     count, ignored = 0, 0
+    src_truncate_count,tgt_truncate_count=0,0
 
     logger.info('Processing %s & %s ...' % (srcFile, tgtFile))
     srcF = open(srcFile, encoding='utf-8')
@@ -89,7 +92,15 @@ def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
         srcWords = sline.split(' ')
         tgtWords = tline.split(' ')
 
-        if len(srcWords) <= seq_length and len(tgtWords) <= seq_length:
+        if TRUNCATE:
+            if len(srcWords) > MAX_SRC_LENGTH:
+                srcWords = srcWords[:MAX_SRC_LENGTH]
+                src_truncate_count += 1
+            if len(tgtWords) > MAX_TGT_LENGTH:
+                tgtWords = tgtWords[:MAX_TGT_LENGTH]
+                tgt_truncate_count += 1
+
+        if len(srcWords) <= MAX_SRC_LENGTH and len(tgtWords) <= MAX_TGT_LENGTH:
             src += [srcDicts.convertToIdx(srcWords,
                                           s2s.Constants.UNK_WORD)]
             tgt += [tgtDicts.convertToIdx(tgtWords,
@@ -122,7 +133,9 @@ def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
     tgt = [tgt[idx] for idx in perm]
 
     logger.info('Prepared %d sentences (%d ignored due to length == 0 or > %d)' %
-                (len(src), ignored, seq_length))
+                (len(src), ignored, MAX_SRC_LENGTH))
+    logger.info('{0} source truncated'.format(src_truncate_count))
+    logger.info('{0} target truncated'.format(tgt_truncate_count))
     return src, tgt
 
 

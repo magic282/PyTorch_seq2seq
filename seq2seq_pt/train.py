@@ -270,7 +270,12 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
 
 def main():
     import onlinePreprocess
-    onlinePreprocess.seq_length = opt.max_sent_length
+    onlinePreprocess.MAX_SRC_LENGTH = opt.max_src_length
+    onlinePreprocess.MAX_TGT_LENGTH = opt.max_tgt_length
+    if opt.lower_input:
+        onlinePreprocess.lower = opt.lower_input
+    if opt.truncate_sentence:
+        onlinePreprocess.TRUNCATE = True
     onlinePreprocess.shuffle = 1 if opt.process_shuffle else 0
     from onlinePreprocess import prepare_data_online
     dataset = prepare_data_online(opt.train_src, opt.src_vocab, opt.train_tgt, opt.tgt_vocab)

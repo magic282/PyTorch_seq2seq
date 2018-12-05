@@ -27,6 +27,15 @@ def add_data_options(parser):
     parser.add_argument('-train_tgt')
     parser.add_argument('-tgt_vocab')
 
+    parser.add_argument('-lower_input', action="store_true",
+                        help="Lower case all the input. Default is False")
+    parser.add_argument('-max_src_length', type=int, default=100,
+                        help='Maximum source sentence length.')
+    parser.add_argument('-max_tgt_length', type=int, default=100,
+                        help='Maximum source sentence length.')
+    parser.add_argument('-truncate_sentence', action="store_true",
+                        help='Truncate long sentence if set ')
+
     # Test options
     parser.add_argument('-dev_input_src',
                         help='Path to the dev input file.')
@@ -99,7 +108,7 @@ def add_train_options(parser):
                         shuffle and re-assign mini-batches""")
 
     # learning rate
-    parser.add_argument('-learning_rate', type=float, default=1.0,
+    parser.add_argument('-learning_rate', type=float, default=0.01,
                         help="""Starting learning rate. If adagrad/adadelta/adam is
                         used, then this is the global learning rate. Recommended
                         settings: sgd = 1, adagrad = 0.1, adadelta = 1, adam = 0.001""")
