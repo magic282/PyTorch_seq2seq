@@ -76,29 +76,42 @@ def loss_function(g_outputs, g_targets, generator, crit, eval=False):
     return total_loss, report_loss, 0
 
 
-def generate_copy_loss_function(g_outputs, c_outputs, g_targets,
-                                c_switch, c_targets, c_gate_values,
-                                generator, crit, copyCrit):
-    batch_size = g_outputs.size(1)
+def generate_copy_loss_function(g_outputs, c_gate_values, c_outputs, g_targets,
+                                extended_src_batch, extended_tgt_batch, extended_vocab_size,
+                                generator, crit):
+    total_time_step = len(g_outputs)
+    batch_size = g_outputs[0].size(0)
 
-    g_out_t = g_outputs.view(-1, g_outputs.size(2))
-    g_prob_t = generator(g_out_t)
-    g_prob_t = g_prob_t.view(-1, batch_size, g_prob_t.size(1))
+    extend_zeros = None
+    if extended_vocab_size > 0:
+        extend_zeros = torch.zeros((batch_size, extended_vocab_size)).to(g_outputs[0].device)
 
-    c_output_prob = c_outputs * c_gate_values.expand_as(c_outputs) + 1e-8
-    g_output_prob = g_prob_t * (1 - c_gate_values).expand_as(g_prob_t) + 1e-8
+    all_prob_buf = []
+    for i in range(total_time_step):
+        c_gate = c_gate_values[i]
+        g_digits = g_outputs[i]
+        g_prob = generator(g_digits)
+        g_prob = (1 - c_gate) * g_prob
+        c_prob = c_outputs[i]
+        c_prob = c_gate * c_prob
 
-    c_output_prob_log = torch.log(c_output_prob)
-    g_output_prob_log = torch.log(g_output_prob)
-    c_output_prob_log = c_output_prob_log * (c_switch.unsqueeze(2).expand_as(c_output_prob_log))
-    g_output_prob_log = g_output_prob_log * ((1 - c_switch).unsqueeze(2).expand_as(g_output_prob_log))
+        if extended_vocab_size > 0:
+            extend_prob = torch.cat((g_prob, extend_zeros), 1)
+            extend_prob = extend_prob.scatter_add(1, extended_src_batch, c_prob)
+        else:
+            extend_prob = g_prob
+        all_prob_buf.append(extend_prob)
 
-    g_output_prob_log = g_output_prob_log.view(-1, g_output_prob_log.size(2))
-    c_output_prob_log = c_output_prob_log.view(-1, c_output_prob_log.size(2))
+    prob = torch.stack(all_prob_buf) + 1e-8
+    log_prob = torch.log(prob)
+    log_prob = log_prob.view(total_time_step * batch_size, -1)
+    targets = extended_tgt_batch.view(-1)
+    loss = crit(log_prob, targets)
+    loss = loss.view(total_time_step, batch_size)
+    mask = extended_tgt_batch.eq(s2s.Constants.PAD).float()
+    loss = (1 - mask) * loss
 
-    g_loss = crit(g_output_prob_log, g_targets.view(-1))
-    c_loss = copyCrit(c_output_prob_log, c_targets.view(-1))
-    total_loss = g_loss + c_loss
+    total_loss = torch.sum(loss)
     report_loss = total_loss.item()
     return total_loss, report_loss, 0
 
@@ -117,6 +130,7 @@ def load_dev_data(translator, src_file, tgt_file):
     for line, tgt in addPair(srcF, tgtF):
         if (line is not None) and (tgt is not None):
             src_tokens = line.strip().split(' ')
+            src_tokens = src_tokens[:opt.max_src_length]
             src_batch += [src_tokens]
             tgt_tokens = tgt.strip().split(' ')
             tgt_batch += [tgt_tokens]
@@ -127,8 +141,8 @@ def load_dev_data(translator, src_file, tgt_file):
             # at the end of file, check last batch
             if len(src_batch) == 0:
                 break
-        data = translator.buildData(src_batch, tgt_batch)
-        dataset.append(data)
+        data, src_oovs_data = translator.buildData(src_batch, tgt_batch)
+        dataset.append((data, src_oovs_data))
         raw.append((src_batch, tgt_batch))
         src_batch, tgt_batch = [], []
     srcF.close()
@@ -152,12 +166,18 @@ def evalModel(model, translator, evalData):
     predict, gold = [], []
     processed_data, raw_data = evalData
     for batch, raw_batch in zip(processed_data, raw_data):
-        # (wrap(srcBatch), lengths), (wrap(tgtBatch), ), indices
-        src, tgt, indices = batch[0]
+        """
+        (wrap(srcBatch), lengths), \
+               (simple_wrap(extended_src_batch), max(extended_vocab_size)), \
+               (wrap(tgtBatch), wrap(extended_tgt_batch),), \
+               indices
+        """
+        src, extend, tgt, indices = batch[0][0]
+        src_oovs_data = batch[1]
         src_batch, tgt_batch = raw_batch
 
         #  (2) translate
-        pred, predScore, predIsCopy, predCopyPosition, attn, _ = translator.translateBatch(src, tgt)
+        pred, predScore, predIsCopy, predCopyPosition, attn, _ = translator.translateBatch(src, extend, tgt)
         pred, predScore, predIsCopy, predCopyPosition, attn = list(zip(
             *sorted(zip(pred, predScore, predIsCopy, predCopyPosition, attn, indices),
                     key=lambda x: x[-1])))[:-1]
@@ -167,7 +187,7 @@ def evalModel(model, translator, evalData):
         for b in range(src[0].size(1)):
             n = 0
             predBatch.append(
-                translator.buildTargetTokens(pred[b][n], src_batch[b],
+                translator.buildTargetTokens(pred[b][n], src_batch[b], src_oovs_data[b],
                                              predIsCopy[b][n], predCopyPosition[b][n], attn[b][n])
             )
         gold += [' '.join(r) for r in tgt_batch]
@@ -175,7 +195,8 @@ def evalModel(model, translator, evalData):
         # nltk BLEU evaluator needs tokenized sentences
         # gold += [[r] for r in tgt_batch]
         # predict += predBatch
-    no_copy_mark_predict = [sent.replace('[[', '').replace(']]', '') for sent in predict]
+    no_copy_mark_predict = [sent.replace('[[', '').replace(']]', '').replace('<t>', '').replace('</t>', '') for sent in
+                            predict]
     scores = rouge_calculator.compute_rouge(gold, no_copy_mark_predict)
     report_metric = scores['rouge-2']['f'][0]
 
@@ -196,8 +217,8 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
     logger.warning("Set model to {0} mode".format('train' if model.decoder.dropout.training else 'eval'))
 
     # define criterion of each GPU
-    criterion = NMTCriterion(dataset['dicts']['tgt'].size())
-    copyLossF = nn.NLLLoss(size_average=False)
+    # criterion = NMTCriterion(dataset['dicts']['tgt'].size())
+    criterion = nn.NLLLoss(size_average=False, reduce=False)
 
     start_time = time.time()
 
@@ -242,7 +263,8 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
             totalBatchCount += 1
             """
             (wrap(srcBatch), lengths), \
-               (wrap(tgtBatch), wrap(copySwitchBatch), wrap(copyTgtBatch)), \
+               (simple_wrap(extended_src_batch), max(extended_vocab_size)), \
+               (wrap(tgtBatch), wrap(extended_tgt_batch),), \
                indices
             """
             batchIdx = batchOrder[i] if epoch > opt.curriculum else i
@@ -251,13 +273,20 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
             model.zero_grad()
             # ipdb.set_trace()
             g_outputs, c_outputs, c_gate_values = model(batch)
-            targets = batch[1][0][1:]  # exclude <s> from targets
-            copy_switch = batch[1][1][1:]
-            c_targets = batch[1][2][1:]
-            # loss, res_loss, num_correct = loss_function(g_outputs, targets, model.generator, criterion)
+            extended_src_batch = batch[1][0]
+            extended_vocab_size = batch[1][1]
+            targets = batch[2][0][1:]  # exclude <s> from targets
+            extended_tgt_batch = batch[2][1][1:]  # exclude <s> from targets
+
+            """
+            def generate_copy_loss_function(g_outputs, c_gate_values, c_outputs, g_targets,
+                                extended_src_batch, extended_tgt_batch, extended_vocab_size,
+                                 generator, crit):
+            """
             loss, res_loss, num_correct = generate_copy_loss_function(
-                g_outputs, c_outputs, targets, copy_switch, c_targets, c_gate_values, model.generator, criterion,
-                copyLossF)
+                g_outputs, c_gate_values, c_outputs, targets,
+                extended_src_batch, extended_tgt_batch, extended_vocab_size,
+                model.generator, criterion)
 
             if math.isnan(res_loss) or res_loss > 1e20:
                 logger.info('catch NaN')
@@ -319,7 +348,10 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
 def main():
     import onlinePreprocess
     onlinePreprocess.lower = opt.lower_input
-    onlinePreprocess.seq_length = opt.max_sent_length
+    onlinePreprocess.MAX_SRC_LENGTH = opt.max_src_length
+    onlinePreprocess.MAX_TGT_LENGTH = opt.max_tgt_length
+    if opt.truncate_sentence:
+        onlinePreprocess.TRUNCATE = True
     onlinePreprocess.shuffle = 1 if opt.process_shuffle else 0
     from onlinePreprocess import prepare_data_online
     dataset = prepare_data_online(opt.train_src, opt.src_vocab, opt.train_tgt, opt.tgt_vocab)
@@ -331,7 +363,8 @@ def main():
         dataset['dicts'] = checkpoint['dicts']
 
     trainData = s2s.Dataset(dataset['train']['src'], dataset['train']['tgt'],
-                            dataset['train']['switch'], dataset['train']['c_tgt'],
+                            dataset['train']['extended_src'], dataset['train']['extended_tgt'],
+                            dataset['train']['extend_vocab_size'],
                             opt.batch_size, opt.gpus)
     dicts = dataset['dicts']
     logger.info(' * vocabulary size. source = %d; target = %d' %

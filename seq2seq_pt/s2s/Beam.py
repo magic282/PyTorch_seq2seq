@@ -22,9 +22,10 @@ except ImportError:
 
 
 class Beam(object):
-    def __init__(self, size, cuda=False):
+    def __init__(self, size, vocab_size, cuda=False):
 
         self.size = size
+        self.vocab_size = vocab_size
         self.done = False
 
         self.tt = torch.cuda if cuda else torch
@@ -66,22 +67,20 @@ class Beam(object):
     #     * `attnOut`- attention at the last step
     #
     # Returns: True if beam search is complete.
-    def advance(self, wordLk, copyLk, attnOut):
-        numWords = wordLk.size(1)
-        numSrc = copyLk.size(1)
-        numAll = numWords + numSrc
-        allScores = torch.cat((wordLk, copyLk), dim=1)
+    def advance(self, wordLk, attnOut):
+        vocab_size = self.vocab_size
+        numAll = wordLk.size(1)
 
         # self.length += 1  # TODO: some is finished so do not acc length for them
         if len(self.prevKs) > 0:
             finish_index = self.nextYs[-1].eq(s2s.Constants.EOS)
             if any(finish_index):
                 # wordLk.masked_fill_(finish_index.unsqueeze(1).expand_as(wordLk), -float('inf'))
-                allScores.masked_fill_(finish_index.unsqueeze(1).expand_as(allScores), -float('inf'))
+                wordLk.masked_fill_(finish_index.unsqueeze(1).expand_as(wordLk), -float('inf'))
                 for i in range(self.size):
                     if self.nextYs[-1][i] == s2s.Constants.EOS:
                         # wordLk[i][s2s.Constants.EOS] = 0
-                        allScores[i][s2s.Constants.EOS] = 0
+                        wordLk[i][s2s.Constants.EOS] = 0
             # set up the current step length
             cur_length = self.all_length[-1]
             for i in range(self.size):
@@ -90,14 +89,12 @@ class Beam(object):
         # Sum the previous scores.
         if len(self.prevKs) > 0:
             prev_score = self.all_scores[-1]
-            # now_acc_score = wordLk + prev_score.unsqueeze(1).expand_as(wordLk)
-            # beamLk = now_acc_score / cur_length.unsqueeze(1).expand_as(now_acc_score)
-            now_acc_score = allScores + prev_score.unsqueeze(1).expand_as(allScores)
+            now_acc_score = wordLk + prev_score.unsqueeze(1).expand_as(wordLk)
             beamLk = now_acc_score / cur_length.unsqueeze(1).expand_as(now_acc_score)
         else:
             self.all_length.append(self.tt.FloatTensor(self.size).fill_(1))
             # beamLk = wordLk[0]
-            beamLk = allScores[0]
+            beamLk = wordLk[0]
 
         flatBeamLk = beamLk.view(-1)
 
@@ -109,7 +106,7 @@ class Beam(object):
         prevK = bestScoresId / numAll
         # predict = bestScoresId - prevK * numWords
         predict = bestScoresId - prevK * numAll
-        isCopy = predict.ge(self.tt.LongTensor(self.size).fill_(numWords)).long()
+        isCopy = predict.ge(self.tt.LongTensor(self.size).fill_(self.vocab_size)).long()
         final_predict = predict * (1 - isCopy) + isCopy * s2s.Constants.UNK
 
         if len(self.prevKs) > 0:

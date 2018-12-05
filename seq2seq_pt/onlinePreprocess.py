@@ -1,6 +1,7 @@
 import logging
 import torch
 import s2s
+from s2s.data_utils import src_to_ids, tgt_to_ids
 
 try:
     import ipdb
@@ -8,7 +9,9 @@ except ImportError:
     pass
 
 lower = True
-seq_length = 100
+MAX_SRC_LENGTH = 100
+MAX_TGT_LENGTH = 100
+TRUNCATE = False
 report_every = 100000
 shuffle = 1
 
@@ -58,9 +61,11 @@ def saveVocabulary(name, vocab, file):
 
 def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
     src, tgt = [], []
-    switch, c_tgt = [], []
+    extended_src, extended_tgt = [], []
+    extend_vocab_size = []
     sizes = []
     count, ignored = 0, 0
+    src_truncate_count, tgt_truncate_count = 0, 0
 
     logger.info('Processing %s & %s ...' % (srcFile, tgtFile))
     srcF = open(srcFile, encoding='utf-8')
@@ -90,24 +95,26 @@ def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
         srcWords = sline.split(' ')
         tgtWords = tline.split(' ')
 
-        if len(srcWords) <= seq_length and len(tgtWords) <= seq_length:
+        if TRUNCATE:
+            if len(srcWords) > MAX_SRC_LENGTH:
+                srcWords = srcWords[:MAX_SRC_LENGTH]
+                src_truncate_count += 1
+            if len(tgtWords) > MAX_TGT_LENGTH:
+                tgtWords = tgtWords[:MAX_TGT_LENGTH]
+                tgt_truncate_count += 1
+
+        if len(srcWords) <= MAX_SRC_LENGTH and len(tgtWords) <= MAX_TGT_LENGTH:
             src += [srcDicts.convertToIdx(srcWords,
                                           s2s.Constants.UNK_WORD)]
             tgt += [tgtDicts.convertToIdx(tgtWords,
                                           s2s.Constants.UNK_WORD,
                                           s2s.Constants.BOS_WORD,
                                           s2s.Constants.EOS_WORD)]
-            switch_buf = [0] * (len(tgtWords) + 2)
-            c_tgt_buf = [0] * (len(tgtWords) + 2)
-            for idx, tgt_word in enumerate(tgtWords):
-                word_id = tgtDicts.lookup(tgt_word, None)
-                if word_id is None:
-                    if tgt_word in srcWords:
-                        copy_position = srcWords.index(tgt_word)
-                        switch_buf[idx + 1] = 1
-                        c_tgt_buf[idx + 1] = copy_position
-            switch.append(torch.FloatTensor(switch_buf))
-            c_tgt.append(torch.LongTensor(c_tgt_buf))
+            extended_src_ids, src_oovs = src_to_ids(srcWords, srcDicts)
+            extend_tgt_ids = tgt_to_ids(tgtWords, tgtDicts, src_oovs, s2s.Constants.BOS_WORD, s2s.Constants.EOS_WORD)
+            extended_src += [torch.LongTensor(extended_src_ids)]
+            extended_tgt += [torch.LongTensor(extend_tgt_ids)]
+            extend_vocab_size.append(len(src_oovs))
 
             sizes += [len(srcWords)]
         else:
@@ -126,20 +133,24 @@ def makeData(srcFile, tgtFile, srcDicts, tgtDicts):
         perm = torch.randperm(len(src))
         src = [src[idx] for idx in perm]
         tgt = [tgt[idx] for idx in perm]
-        switch = [switch[idx] for idx in perm]
-        c_tgt = [c_tgt[idx] for idx in perm]
+        extended_src = [extended_src[idx] for idx in perm]
+        extended_tgt = [extended_tgt[idx] for idx in perm]
+        extend_vocab_size = [extend_vocab_size[idx] for idx in perm]
         sizes = [sizes[idx] for idx in perm]
 
     logger.info('... sorting sentences by size')
     _, perm = torch.sort(torch.Tensor(sizes))
     src = [src[idx] for idx in perm]
     tgt = [tgt[idx] for idx in perm]
-    switch = [switch[idx] for idx in perm]
-    c_tgt = [c_tgt[idx] for idx in perm]
+    extended_src = [extended_src[idx] for idx in perm]
+    extended_tgt = [extended_tgt[idx] for idx in perm]
+    extend_vocab_size = [extend_vocab_size[idx] for idx in perm]
 
     logger.info('Prepared %d sentences (%d ignored due to length == 0 or > %d)' %
-                (len(src), ignored, seq_length))
-    return src, tgt, switch, c_tgt
+                (len(src), ignored, MAX_SRC_LENGTH))
+    logger.info('{0} source truncated'.format(src_truncate_count))
+    logger.info('{0} target truncated'.format(tgt_truncate_count))
+    return src, tgt, extended_src, extended_tgt, extend_vocab_size
 
 
 def prepare_data_online(train_src, src_vocab, train_tgt, tgt_vocab):
@@ -149,10 +160,11 @@ def prepare_data_online(train_src, src_vocab, train_tgt, tgt_vocab):
 
     logger.info('Preparing training ...')
     train = {}
-    train['src'], train['tgt'], train['switch'], train['c_tgt'] = makeData(train_src,
-                                                                           train_tgt,
-                                                                           dicts['src'],
-                                                                           dicts['tgt'])
+    train['src'], train['tgt'], \
+    train['extended_src'], train['extended_tgt'], train['extend_vocab_size'] = makeData(train_src,
+                                                                                        train_tgt,
+                                                                                        dicts['src'],
+                                                                                        dicts['tgt'])
 
     dataset = {'dicts': dicts,
                'train': train,

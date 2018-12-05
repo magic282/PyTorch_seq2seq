@@ -128,9 +128,9 @@ class Decoder(nn.Module):
             g_outputs += [output]
             c_outputs += [attn]
             copyGateOutputs += [copyProb]
-        g_outputs = torch.stack(g_outputs)
-        c_outputs = torch.stack(c_outputs)
-        copyGateOutputs = torch.stack(copyGateOutputs)
+        # g_outputs = torch.stack(g_outputs)
+        # c_outputs = torch.stack(c_outputs)
+        # copyGateOutputs = torch.stack(copyGateOutputs)
         return g_outputs, c_outputs, copyGateOutputs, hidden, attn, cur_context
 
 
@@ -164,11 +164,14 @@ class NMTModel(nn.Module):
 
     def forward(self, input):
         """
-        input: (wrap(srcBatch), wrap(srcBioBatch), lengths), (wrap(tgtBatch), wrap(copySwitchBatch), wrap(copyTgtBatch))
+        input: (wrap(srcBatch), lengths), \
+               (simple_wrap(extended_src_batch), max(extended_vocab_size)), \
+               (wrap(tgtBatch), wrap(extended_tgt_batch),), \
+               indices
         """
         # ipdb.set_trace()
         src = input[0]
-        tgt = input[1][0][:-1]  # exclude last target from inputs
+        tgt = input[2][0][:-1]  # exclude last target from inputs
         src_pad_mask = Variable(src[0].data.eq(s2s.Constants.PAD).transpose(0, 1).float(), requires_grad=False,
                                 volatile=False)
         enc_hidden, context = self.encoder(src)

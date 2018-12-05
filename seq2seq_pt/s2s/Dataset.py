@@ -10,19 +10,18 @@ import s2s
 
 
 class Dataset(object):
-    def __init__(self, srcData, tgtData, copySwitchData, copyTgtData,
-                 batchSize, cuda):
+    def __init__(self, srcData, tgtData, extended_src_data, extended_tgt_data, extend_vocab_size_data, batchSize, cuda):
         self.src = srcData
+        self.extended_src = extended_src_data
+        self.extend_vocab_size = extend_vocab_size_data
         if tgtData:
             self.tgt = tgtData
             # copy switch should company tgt label
-            self.copySwitch = copySwitchData
-            self.copyTgt = copyTgtData
+            self.extended_tgt = extended_tgt_data
             assert (len(self.src) == len(self.tgt))
         else:
             self.tgt = None
-            self.copySwitch = None
-            self.copyTgt = None
+            self.extended_tgt = None
         self.device = torch.device("cuda" if cuda else "cpu")
 
         self.batchSize = batchSize
@@ -47,41 +46,32 @@ class Dataset(object):
         srcBatch, lengths = self._batchify(
             self.src[index * self.batchSize:(index + 1) * self.batchSize],
             align_right=False, include_lengths=True)
+        extended_src_batch = self._batchify(
+            self.extended_src[index * self.batchSize:(index + 1) * self.batchSize])
+        extended_vocab_size = self.extend_vocab_size[index * self.batchSize:(index + 1) * self.batchSize]
 
         if self.tgt:
             tgtBatch = self._batchify(
                 self.tgt[index * self.batchSize:(index + 1) * self.batchSize])
+            extended_tgt_batch = self._batchify(
+                self.extended_tgt[index * self.batchSize:(index + 1) * self.batchSize])
 
         else:
             tgtBatch = None
-
-        if self.copySwitch is not None:
-            copySwitchBatch = self._batchify(
-                self.copySwitch[index * self.batchSize:(index + 1) * self.batchSize])
-            copyTgtBatch = self._batchify(
-                self.copyTgt[index * self.batchSize:(index + 1) * self.batchSize])
-        else:
-            copySwitchBatch = None
-            copyTgtBatch = None
+            extended_tgt_batch = None
 
         # within batch sorting by decreasing length for variable length rnns
         indices = range(len(srcBatch))
         if tgtBatch is None:
-            batch = zip(indices, srcBatch)
+            batch = zip(indices, srcBatch, extended_src_batch, extended_vocab_size)
         else:
-            if self.copySwitch is not None:
-                batch = zip(indices, srcBatch, tgtBatch, copySwitchBatch, copyTgtBatch)
-            else:
-                batch = zip(indices, srcBatch, tgtBatch)
+            batch = zip(indices, srcBatch, extended_src_batch, extended_vocab_size, tgtBatch, extended_tgt_batch)
         # batch = zip(indices, srcBatch) if tgtBatch is None else zip(indices, srcBatch, tgtBatch)
         batch, lengths = zip(*sorted(zip(batch, lengths), key=lambda x: -x[1]))
         if tgtBatch is None:
-            indices, srcBatch = zip(*batch)
+            indices, srcBatch, extended_src_batch, extended_vocab_size = zip(*batch)
         else:
-            if self.copySwitch is not None:
-                indices, srcBatch, tgtBatch, copySwitchBatch, copyTgtBatch = zip(*batch)
-            else:
-                indices, srcBatch, tgtBatch = zip(*batch)
+            indices, srcBatch, extended_src_batch, extended_vocab_size, tgtBatch, extended_tgt_batch = zip(*batch)
 
         def wrap(b):
             if b is None:
@@ -90,11 +80,19 @@ class Dataset(object):
             b = b.to(self.device)
             return b
 
+        def simple_wrap(b):
+            if b is None:
+                return b
+            b = torch.stack(b, 0).contiguous()
+            b = b.to(self.device)
+            return b
+
         # wrap lengths in a Variable to properly split it in DataParallel
         lengths = torch.LongTensor(lengths).view(1, -1)
 
         return (wrap(srcBatch), lengths), \
-               (wrap(tgtBatch), wrap(copySwitchBatch), wrap(copyTgtBatch)), \
+               (simple_wrap(extended_src_batch), max(extended_vocab_size)), \
+               (wrap(tgtBatch), wrap(extended_tgt_batch),), \
                indices
 
     def __len__(self):
@@ -102,6 +100,6 @@ class Dataset(object):
 
     def shuffle(self):
         data = list(
-            zip(self.src, self.tgt, self.copySwitch, self.copyTgt))
-        self.src, self.tgt, self.copySwitch, self.copyTgt = zip(
+            zip(self.src, self.tgt, self.extended_src, self.extended_tgt, self.extend_vocab_size))
+        self.src, self.tgt, self.extended_src, self.extended_tgt, self.extend_vocab_size = zip(
             *[data[i] for i in torch.randperm(len(data))])
