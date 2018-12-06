@@ -76,7 +76,7 @@ def loss_function(g_outputs, g_targets, generator, crit, eval=False):
     return total_loss, report_loss, 0
 
 
-def generate_copy_loss_function(g_outputs, c_gate_values, c_outputs, g_targets,
+def generate_copy_loss_function(g_outputs, c_gate_values, c_outputs, g_targets, tgt_mask,
                                 extended_src_batch, extended_tgt_batch, extended_vocab_size,
                                 generator, crit):
     total_time_step = len(g_outputs)
@@ -108,12 +108,23 @@ def generate_copy_loss_function(g_outputs, c_gate_values, c_outputs, g_targets,
     targets = extended_tgt_batch.view(-1)
     loss = crit(log_prob, targets)
     loss = loss.view(total_time_step, batch_size)
-    mask = extended_tgt_batch.eq(s2s.Constants.PAD).float()
-    loss = (1 - mask) * loss
+
+    loss = (1 - tgt_mask) * loss
 
     total_loss = torch.sum(loss)
     report_loss = total_loss.item()
     return total_loss, report_loss, 0
+
+
+def coverage_loss_function(all_coverage, all_attn, tgt_mask):
+    coverage = torch.stack(all_coverage)
+    attn = torch.stack(all_attn)
+    loss = torch.min(coverage, attn)
+    loss = torch.sum(loss, 2)
+    loss = loss * (1 - tgt_mask)
+    loss = torch.sum(loss)
+
+    return loss
 
 
 def addPair(f1, f2):
@@ -190,7 +201,7 @@ def evalModel(model, translator, evalData):
                 translator.buildTargetTokens(pred[b][n], src_batch[b], src_oovs_data[b],
                                              predIsCopy[b][n], predCopyPosition[b][n], attn[b][n])
             )
-        gold += [' '.join(r) for r in tgt_batch]
+        gold += [' '.join(r).replace('<t>', '').replace('</t>', '') for r in tgt_batch]
         predict += [' '.join(sents) for sents in predBatch]
         # nltk BLEU evaluator needs tokenized sentences
         # gold += [[r] for r in tgt_batch]
@@ -198,6 +209,7 @@ def evalModel(model, translator, evalData):
     no_copy_mark_predict = [sent.replace('[[', '').replace(']]', '').replace('<t>', '').replace('</t>', '') for sent in
                             predict]
     scores = rouge_calculator.compute_rouge(gold, no_copy_mark_predict)
+    logger.info(str(scores))
     report_metric = scores['rouge-2']['f'][0]
 
     # no_copy_mark_predict = [[word.replace('[[', '').replace(']]', '') for word in sent] for sent in predict]
@@ -272,21 +284,25 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
 
             model.zero_grad()
             # ipdb.set_trace()
-            g_outputs, c_outputs, c_gate_values = model(batch)
+            g_outputs, c_outputs, c_gate_values, all_attn, all_coverage = model(batch)
             extended_src_batch = batch[1][0]
             extended_vocab_size = batch[1][1]
             targets = batch[2][0][1:]  # exclude <s> from targets
             extended_tgt_batch = batch[2][1][1:]  # exclude <s> from targets
+            tgt_mask = targets.eq(s2s.Constants.PAD).float()
 
             """
-            def generate_copy_loss_function(g_outputs, c_gate_values, c_outputs, g_targets,
+            def generate_copy_loss_function(g_outputs, c_gate_values, c_outputs, g_targets, tgt_mask,
                                 extended_src_batch, extended_tgt_batch, extended_vocab_size,
-                                 generator, crit):
+                                generator, crit):
             """
             loss, res_loss, num_correct = generate_copy_loss_function(
-                g_outputs, c_gate_values, c_outputs, targets,
+                g_outputs, c_gate_values, c_outputs, targets, tgt_mask,
                 extended_src_batch, extended_tgt_batch, extended_vocab_size,
                 model.generator, criterion)
+            coverage_loss = coverage_loss_function(all_coverage, all_attn, tgt_mask)
+
+            loss = loss + coverage_loss
 
             if math.isnan(res_loss) or res_loss > 1e20:
                 logger.info('catch NaN')

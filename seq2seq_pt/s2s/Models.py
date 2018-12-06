@@ -87,7 +87,8 @@ class Decoder(nn.Module):
                                      opt.word_vec_size,
                                      padding_idx=s2s.Constants.PAD)
         self.rnn = StackedGRU(opt.layers, input_size, opt.dec_rnn_size, opt.dropout)
-        self.attn = s2s.modules.ConcatAttention(opt.enc_rnn_size, opt.dec_rnn_size, opt.att_vec_size)
+        # self.attn = s2s.modules.ConcatAttention(opt.enc_rnn_size, opt.dec_rnn_size, opt.att_vec_size)
+        self.attn = s2s.modules.ConcatAttentionCoverage(opt.enc_rnn_size, opt.dec_rnn_size, opt.att_vec_size)
         self.dropout = nn.Dropout(opt.dropout)
         self.readout = nn.Linear((opt.enc_rnn_size + opt.dec_rnn_size + opt.word_vec_size), opt.dec_rnn_size)
         self.maxout = s2s.modules.MaxOut(opt.maxout_pool_size)
@@ -102,13 +103,17 @@ class Decoder(nn.Module):
             pretrained = torch.load(opt.pre_word_vecs_dec)
             self.word_lut.weight.data.copy_(pretrained)
 
-    def forward(self, input, hidden, context, src_pad_mask, init_att):
+    def forward(self, input, hidden, context, src_pad_mask, init_att, init_converage):
         emb = self.word_lut(input)
 
         g_outputs = []
         c_outputs = []
         copyGateOutputs = []
+        all_attn = []
+        all_coverage = []
+
         cur_context = init_att
+        cur_coverage = init_converage
         self.attn.applyMask(src_pad_mask)
         precompute = None
         for emb_t in emb.split(1):
@@ -117,7 +122,8 @@ class Decoder(nn.Module):
             if self.input_feed:
                 input_emb = torch.cat([emb_t, cur_context], 1)
             output, hidden = self.rnn(input_emb, hidden)
-            cur_context, attn, precompute = self.attn(output, context.transpose(0, 1), precompute)
+            cur_context, attn, coverage_acc, precompute = self.attn(output, context.transpose(0, 1), cur_coverage,
+                                                                    precompute)
 
             copyProb = self.copySwitch(torch.cat((output, cur_context), dim=1))
             copyProb = F.sigmoid(copyProb)
@@ -128,10 +134,13 @@ class Decoder(nn.Module):
             g_outputs += [output]
             c_outputs += [attn]
             copyGateOutputs += [copyProb]
+            all_attn += [attn]
+            all_coverage += [coverage_acc]
+            cur_coverage = coverage_acc
         # g_outputs = torch.stack(g_outputs)
         # c_outputs = torch.stack(c_outputs)
         # copyGateOutputs = torch.stack(copyGateOutputs)
-        return g_outputs, c_outputs, copyGateOutputs, hidden, attn, cur_context
+        return g_outputs, c_outputs, copyGateOutputs, hidden, all_attn, all_coverage, cur_context
 
 
 class DecInit(nn.Module):
@@ -170,7 +179,7 @@ class NMTModel(nn.Module):
                indices
         """
         # ipdb.set_trace()
-        src = input[0]
+        src = input[0]  # (seq, batch)
         tgt = input[2][0][:-1]  # exclude last target from inputs
         src_pad_mask = Variable(src[0].data.eq(s2s.Constants.PAD).transpose(0, 1).float(), requires_grad=False,
                                 volatile=False)
@@ -179,7 +188,11 @@ class NMTModel(nn.Module):
         init_att = self.make_init_att(context)
         enc_hidden = self.decIniter(enc_hidden[1]).unsqueeze(0)  # [1] is the last backward hiden
 
-        g_out, c_out, c_gate_out, dec_hidden, _attn, _attention_vector = self.decoder(tgt, enc_hidden, context,
-                                                                                      src_pad_mask, init_att)
+        init_coverage = torch.zeros((src[0].size(1), src[0].size(0))).to(src[0].device)
+        g_out, c_out, c_gate_out, dec_hidden, all_attn, all_converage, _attention_vector = self.decoder(tgt, enc_hidden,
+                                                                                                        context,
+                                                                                                        src_pad_mask,
+                                                                                                        init_att,
+                                                                                                        init_coverage)
 
-        return g_out, c_out, c_gate_out
+        return g_out, c_out, c_gate_out, all_attn, all_converage

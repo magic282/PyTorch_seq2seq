@@ -123,6 +123,8 @@ class Translator(object):
         att_vec = self.model.make_init_att(context)
         padMask = srcBatch.data.eq(s2s.Constants.PAD).transpose(0, 1).unsqueeze(0).repeat(beamSize, 1, 1).float()
 
+        cur_coverage = torch.zeros((context.size(1), context.size(0))).to(context.device)  # (beam*batch, seq)
+
         beam = [s2s.Beam(beamSize, self.tgt_dict.size(), self.opt.cuda) for k in range(batchSize)]
         batchIdx = list(range(batchSize))
         remainingSents = batchSize
@@ -131,18 +133,20 @@ class Translator(object):
             # Prepare decoder input.
             input = torch.stack([b.getCurrentState() for b in beam
                                  if not b.done]).transpose(0, 1).contiguous().view(1, -1)
-            g_outputs, c_outputs, copyGateOutputs, decStates, attn, att_vec = \
-                self.model.decoder(input, decStates, context, padMask.view(-1, padMask.size(2)), att_vec)
+            g_outputs, c_outputs, copyGateOutputs, decStates, attn, coverage, att_vec = \
+                self.model.decoder(input, decStates, context, padMask.view(-1, padMask.size(2)), att_vec, cur_coverage)
 
             g_outputs = g_outputs[0]
             c_outputs = c_outputs[0]
+            attn = attn[0]
+            coverage = coverage[0]
             copyGateOutputs = copyGateOutputs[0]
             # g_outputs: 1 x (beam*batch) x numWords
             copyGateOutputs = copyGateOutputs.view(-1, 1)
-            g_outputs = g_outputs.squeeze(0)
+            # g_outputs = g_outputs.squeeze(0)
             g_out_prob = self.model.generator.forward(g_outputs)
             g_out_prob = g_out_prob * ((1 - copyGateOutputs).expand_as(g_out_prob))
-            c_outputs = c_outputs.squeeze(0)
+            # c_outputs = c_outputs.squeeze(0)
             c_prob = c_outputs * (copyGateOutputs.expand_as(c_outputs))
             if extended_vocab_size > 0:
                 extend_prob = torch.cat((g_out_prob, extend_zeros), 1)
@@ -197,12 +201,18 @@ class Translator(object):
             extended_src_batch = extended_src_batch.view(beamSize, remainingSents, -1)
             extended_src_batch = extended_src_batch.index_select(1, activeIdx)
             extended_src_batch = extended_src_batch.view(-1, extended_src_batch.size(2))
+            cur_coverage = coverage.view(beamSize, remainingSents, -1)
+            cur_coverage = cur_coverage.index_select(1, activeIdx)
+            cur_coverage = cur_coverage.view(-1, cur_coverage.size(2))
 
             # set correct state for beam search
             previous_index = torch.stack(real_father_idx).transpose(0, 1).contiguous()
             decStates = decStates.view(-1, decStates.size(2)).index_select(0, previous_index.view(-1)).view(
                 *decStates.size())
             att_vec = att_vec.view(-1, att_vec.size(1)).index_select(0, previous_index.view(-1)).view(*att_vec.size())
+            cur_coverage = cur_coverage.view(-1, cur_coverage.size(1)).index_select(0, previous_index.view(-1)).view(
+                *cur_coverage.size())
+
 
             remainingSents = len(active)
 
