@@ -28,7 +28,7 @@ parser.add_argument('-beam_size', type=int, default=12,
                     help='Beam size')
 parser.add_argument('-batch_size', type=int, default=64,
                     help='Batch size')
-parser.add_argument('-max_sent_length', type=int, default=100,
+parser.add_argument('-max_sent_length', type=int, default=400,
                     help='Maximum sentence length.')
 parser.add_argument('-replace_unk', action="store_true",
                     help="""Replace the generated UNK tokens with the source
@@ -86,7 +86,7 @@ def main():
     for line in addone(open(opt.src, encoding='utf-8')):
 
         if (line is not None):
-            srcTokens = line.strip().split(' ')
+            srcTokens = line.strip().split(' ')[:opt.max_sent_length]
             srcBatch += [srcTokens]
             if tgtF:
                 tgtTokens = tgtF.readline().split(' ') if tgtF else None
