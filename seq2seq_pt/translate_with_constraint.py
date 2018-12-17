@@ -25,7 +25,7 @@ parser.add_argument('-tgt',
                     help='True target sequence (optional)')
 parser.add_argument('-prob_file',
                     help='Prob file of source document')
-parser.add_argument('-prob_threshold', type=float,
+parser.add_argument('-prob_threshold', type=float, default=0.15,
                     help='Threshold of word prob in source document')
 parser.add_argument('-output', default='pred.txt',
                     help="""Path to output the predictions (each line will
@@ -81,8 +81,9 @@ def restore_subword(sub_words: List[str]):
             word_buf.append(sb)
             idx_buf.append(idx)
         else:
-            words.append(' '.join(word_buf).replace(" ##", ''))
-            orig_index.append(idx_buf)
+            if len(word_buf) > 0:
+                words.append(' '.join(word_buf).replace(" ##", ''))
+                orig_index.append(idx_buf)
             word_buf = []
             idx_buf = []
             word_buf.append(sb)
@@ -128,17 +129,22 @@ def main():
     for line in addone(open(opt.src, encoding='utf-8')):
         if line is not None:
             srcTokens = line.strip().split(' ')
-            srcBatch += [srcTokens]
+
             constraint_line = constraintF.readline()
             constraint_data = json.loads(constraint_line)
             words = constraint_data["words"]
             probs = constraint_data["class_probabilities"]
             probs = [x[1] for x in probs]
             orig_word, subword_idx = restore_subword(words)
+            if len(srcTokens) != len(orig_word) or any(
+                    [srcTokens[idx] != token for idx, token in enumerate(orig_word)]):
+                raise ValueError("Restore subword failed. Stop!")
+            srcTokens = srcTokens[:400]
+            srcBatch += [srcTokens]
             avg_prob = get_subword_avg_prob(probs, subword_idx)
             prob_tag = [1 if x > prob_threshold else 0 for x in avg_prob]
+            prob_tag = prob_tag[:400]
             probBatch.append(prob_tag)
-
 
             if tgtF:
                 tgtTokens = tgtF.readline().split(' ') if tgtF else None
@@ -187,6 +193,7 @@ def main():
                 logger.info('')
 
         srcBatch, tgtBatch = [], []
+        probBatch = []
 
     reportScore('PRED', predScoreTotal, predWordsTotal)
     # if tgtF:
@@ -194,6 +201,7 @@ def main():
 
     if tgtF:
         tgtF.close()
+    constraintF.close()
 
     logger.info('{0} copy'.format(translator.copyCount))
 
