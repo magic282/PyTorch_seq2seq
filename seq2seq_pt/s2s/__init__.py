@@ -5,3 +5,4 @@ from s2s.Dataset import Dataset
 from s2s.Optim import Optim
 from s2s.Dict import Dict
 from s2s.Beam import Beam
+from s2s.TranslatorWithConstraint import TranslatorWithConstraint
