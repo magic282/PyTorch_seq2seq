@@ -153,6 +153,9 @@ class TranslatorWithConstraint(object):
             # g_outputs = g_outputs.squeeze(0)
             g_out_prob = self.model.generator.forward(g_outputs)
             g_out_prob = g_out_prob * ((1 - copyGateOutputs).expand_as(g_out_prob))
+            if i < self.opt.min_sent_length:
+                fill_index = torch.tensor([s2s.Constants.EOS] * g_out_prob.size(0)).to(g_out_prob.device)
+                g_out_prob.index_fill_(1, fill_index, 0)
             # c_outputs = c_outputs.squeeze(0)
             c_prob = c_outputs * (copyGateOutputs.expand_as(c_outputs))  # (beam, 400)
 

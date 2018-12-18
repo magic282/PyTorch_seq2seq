@@ -34,6 +34,8 @@ parser.add_argument('-beam_size', type=int, default=12,
                     help='Beam size')
 parser.add_argument('-batch_size', type=int, default=64,
                     help='Batch size')
+parser.add_argument('-min_sent_length', type=int, default=35,
+                    help='Minimum sentence length.')
 parser.add_argument('-max_sent_length', type=int, default=100,
                     help='Maximum sentence length.')
 parser.add_argument('-replace_unk', action="store_true",
