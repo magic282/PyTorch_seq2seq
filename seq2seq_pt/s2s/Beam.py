@@ -90,7 +90,9 @@ class Beam(object):
         if len(self.prevKs) > 0:
             prev_score = self.all_scores[-1]
             now_acc_score = wordLk + prev_score.unsqueeze(1).expand_as(wordLk)
-            beamLk = now_acc_score / cur_length.unsqueeze(1).expand_as(now_acc_score)
+            # beamLk = now_acc_score / cur_length.unsqueeze(1).expand_as(now_acc_score)
+            beamLk = now_acc_score / torch.pow((5 + cur_length.unsqueeze(1).expand_as(now_acc_score)) / 6,
+                                               0.9)  # wu length penalty
         else:
             self.all_length.append(self.tt.FloatTensor(self.size).fill_(1))
             # beamLk = wordLk[0]
@@ -156,4 +158,4 @@ class Beam(object):
             copyPos.append(self.nextYs_true[j + 1][k])
             k = self.prevKs[j][k]
 
-        return hyp[::-1],  isCopy[::-1], copyPos[::-1],torch.stack(attn[::-1])
+        return hyp[::-1], isCopy[::-1], copyPos[::-1], torch.stack(attn[::-1])
