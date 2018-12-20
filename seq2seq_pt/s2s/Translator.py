@@ -57,6 +57,7 @@ class Translator(object):
         self.tt = torch.cuda if opt.cuda else torch
         self.model = model
         self.model.eval()
+        self.use_coverage = hasattr(self.model.decoder.attn, 'use_coverage') and self.model.decoder.attn.use_coverage
 
         self.copyCount = 0
 
@@ -123,7 +124,10 @@ class Translator(object):
         att_vec = self.model.make_init_att(context)
         padMask = srcBatch.data.eq(s2s.Constants.PAD).transpose(0, 1).unsqueeze(0).repeat(beamSize, 1, 1).float()
 
-        cur_coverage = torch.zeros((context.size(1), context.size(0))).to(context.device)  # (beam*batch, seq)
+        if self.use_coverage:
+            cur_coverage = torch.zeros((context.size(1), context.size(0))).to(context.device)  # (beam*batch, seq)
+        else:
+            cur_coverage = None
 
         beam = [s2s.Beam(beamSize, self.tgt_dict.size(), self.opt.cuda) for k in range(batchSize)]
         batchIdx = list(range(batchSize))
@@ -201,18 +205,20 @@ class Translator(object):
             extended_src_batch = extended_src_batch.view(beamSize, remainingSents, -1)
             extended_src_batch = extended_src_batch.index_select(1, activeIdx)
             extended_src_batch = extended_src_batch.view(-1, extended_src_batch.size(2))
-            cur_coverage = coverage.view(beamSize, remainingSents, -1)
-            cur_coverage = cur_coverage.index_select(1, activeIdx)
-            cur_coverage = cur_coverage.view(-1, cur_coverage.size(2))
+            if self.use_coverage:
+                cur_coverage = coverage.view(beamSize, remainingSents, -1)
+                cur_coverage = cur_coverage.index_select(1, activeIdx)
+                cur_coverage = cur_coverage.view(-1, cur_coverage.size(2))
 
             # set correct state for beam search
             previous_index = torch.stack(real_father_idx).transpose(0, 1).contiguous()
             decStates = decStates.view(-1, decStates.size(2)).index_select(0, previous_index.view(-1)).view(
                 *decStates.size())
             att_vec = att_vec.view(-1, att_vec.size(1)).index_select(0, previous_index.view(-1)).view(*att_vec.size())
-            cur_coverage = cur_coverage.view(-1, cur_coverage.size(1)).index_select(0, previous_index.view(-1)).view(
-                *cur_coverage.size())
-
+            if self.use_coverage:
+                cur_coverage = cur_coverage.view(-1, cur_coverage.size(1)).index_select(0,
+                                                                                        previous_index.view(-1)).view(
+                    *cur_coverage.size())
 
             remainingSents = len(active)
 

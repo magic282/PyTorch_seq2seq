@@ -300,9 +300,9 @@ def trainModel(model, translator, trainData, validData, dataset, optim):
                 g_outputs, c_gate_values, c_outputs, targets, tgt_mask,
                 extended_src_batch, extended_tgt_batch, extended_vocab_size,
                 model.generator, criterion)
-            coverage_loss = coverage_loss_function(all_coverage, all_attn, tgt_mask)
-
-            loss = loss + coverage_loss
+            if opt.use_coverage:
+                coverage_loss = coverage_loss_function(all_coverage, all_attn, tgt_mask)
+                loss = loss + coverage_loss
 
             if math.isnan(res_loss) or res_loss > 1e20:
                 logger.info('catch NaN')
@@ -445,6 +445,7 @@ def main():
         decoder.load_pretrained_vectors(opt)
 
         optim = s2s.Optim(
+            opt,
             opt.optim, opt.learning_rate,
             max_grad_norm=opt.max_grad_norm,
             max_weight_value=opt.max_weight_value,

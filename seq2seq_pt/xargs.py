@@ -72,6 +72,8 @@ def add_model_options(parser):
     parser.add_argument('-brnn_merge', default='concat',
                         help="""Merge action for the bidirectional hidden states:
                         [concat|sum]""")
+    parser.add_argument('-use_coverage', action='store_true',
+                        help='Use a learned coverage mechanism.')
 
 
 def add_train_options(parser):
@@ -89,8 +91,7 @@ def add_train_options(parser):
     parser.add_argument('-param_init', type=float, default=0.1,
                         help="""Parameters are initialized over uniform distribution
                         with support (-param_init, param_init)""")
-    parser.add_argument('-optim', default='sgd',
-                        help="Optimization method. [sgd|adagrad|adadelta|adam]")
+
     parser.add_argument('-max_grad_norm', type=float, default=5,
                         help="""If the norm of the gradient vector exceeds this,
                         renormalize it to have the norm equal to max_grad_norm""")
@@ -108,6 +109,9 @@ def add_train_options(parser):
                         shuffle and re-assign mini-batches""")
 
     # learning rate
+    parser.add_argument('-optim', default='sgd',
+                        help="Optimization method. [sgd|adagrad|adadelta|adam]")
+    parser.add_argument('-initial_accumulator_value', type=float, default=0.1)
     parser.add_argument('-learning_rate', type=float, default=0.01,
                         help="""Starting learning rate. If adagrad/adadelta/adam is
                         used, then this is the global learning rate. Recommended

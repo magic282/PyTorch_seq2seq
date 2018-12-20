@@ -15,7 +15,8 @@ class Optim(object):
         if self.method == 'sgd':
             self.optimizer = optim.SGD(self.params, lr=self.lr)
         elif self.method == 'adagrad':
-            self.optimizer = optim.Adagrad(self.params, lr=self.lr)
+            self.optimizer = optim.Adagrad(self.params, lr=self.lr,
+                                           initial_accumulator_value=self.initial_accumulator_value)
         elif self.method == 'adadelta':
             self.optimizer = optim.Adadelta(self.params, lr=self.lr)
         elif self.method == 'adam':
@@ -24,13 +25,17 @@ class Optim(object):
         else:
             raise RuntimeError("Invalid optim method: " + self.method)
 
-    def __init__(self, method, lr, max_grad_norm, max_weight_value=None, lr_decay=1, start_decay_at=None,
-                 decay_bad_count=6):
+    def __init__(self, opt, method, lr, max_grad_norm, max_weight_value=None, lr_decay=1, start_decay_at=None,
+                 decay_bad_count=6, ):
+        self.opt = opt
         self.last_ppl = None
         self.lr = lr
         self.max_grad_norm = max_grad_norm
         self.max_weight_value = max_weight_value
         self.method = method
+        if self.method == 'adagrad':
+            self.initial_accumulator_value = opt.initial_accumulator_value
+
         self.lr_decay = lr_decay
         self.start_decay_at = start_decay_at
         self.start_decay = False

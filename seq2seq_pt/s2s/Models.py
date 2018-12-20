@@ -88,7 +88,8 @@ class Decoder(nn.Module):
                                      padding_idx=s2s.Constants.PAD)
         self.rnn = StackedGRU(opt.layers, input_size, opt.dec_rnn_size, opt.dropout)
         # self.attn = s2s.modules.ConcatAttention(opt.enc_rnn_size, opt.dec_rnn_size, opt.att_vec_size)
-        self.attn = s2s.modules.ConcatAttentionCoverage(opt.enc_rnn_size, opt.dec_rnn_size, opt.att_vec_size)
+        self.attn = s2s.modules.ConcatAttentionCoverage(opt.enc_rnn_size, opt.dec_rnn_size,
+                                                        opt.att_vec_size, opt.use_coverage)
         self.dropout = nn.Dropout(opt.dropout)
         self.readout = nn.Linear((opt.enc_rnn_size + opt.dec_rnn_size + opt.word_vec_size), opt.dec_rnn_size)
         self.maxout = s2s.modules.MaxOut(opt.maxout_pool_size)
@@ -188,7 +189,10 @@ class NMTModel(nn.Module):
         init_att = self.make_init_att(context)
         enc_hidden = self.decIniter(enc_hidden[1]).unsqueeze(0)  # [1] is the last backward hiden
 
-        init_coverage = torch.zeros((src[0].size(1), src[0].size(0))).to(src[0].device)
+        if hasattr(self.decoder.attn, 'use_coverage') and self.decoder.attn.use_coverage:
+            init_coverage = torch.zeros((src[0].size(1), src[0].size(0))).to(src[0].device)
+        else:
+            init_coverage = None
         g_out, c_out, c_gate_out, dec_hidden, all_attn, all_converage, _attention_vector = self.decoder(tgt, enc_hidden,
                                                                                                         context,
                                                                                                         src_pad_mask,
