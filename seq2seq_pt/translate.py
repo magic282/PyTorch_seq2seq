@@ -30,6 +30,8 @@ parser.add_argument('-batch_size', type=int, default=64,
                     help='Batch size')
 parser.add_argument('-max_sent_length', type=int, default=400,
                     help='Maximum sentence length.')
+parser.add_argument('-length_penalty')
+parser.add_argument('-coverage_penalty', action="store_true")
 parser.add_argument('-replace_unk', action="store_true",
                     help="""Replace the generated UNK tokens with the source
                     token that had the highest attention weight. If phrase_table

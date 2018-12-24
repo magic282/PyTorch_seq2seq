@@ -129,7 +129,9 @@ class Translator(object):
         else:
             cur_coverage = None
 
-        beam = [s2s.Beam(beamSize, self.tgt_dict.size(), self.opt.cuda) for k in range(batchSize)]
+        beam = [s2s.Beam(beamSize, self.tgt_dict.size(), bottom_up_coverage_penalty=self.opt.coverage_penalty,
+                         length_penalty=self.opt.length_penalty,
+                         cuda=self.opt.cuda) for k in range(batchSize)]
         batchIdx = list(range(batchSize))
         remainingSents = batchSize
 

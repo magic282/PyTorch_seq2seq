@@ -22,10 +22,11 @@ except ImportError:
 
 
 class Beam(object):
-    def __init__(self, size, vocab_size, cuda=False):
+    def __init__(self, size, vocab_size, bottom_up_coverage_penalty, length_penalty, cuda=False):
 
         self.size = size
         self.vocab_size = vocab_size
+        self.bottom_up_coverage_penalty = bottom_up_coverage_penalty
         self.done = False
 
         self.tt = torch.cuda if cuda else torch
@@ -50,6 +51,22 @@ class Beam(object):
         # is copy for each time
         self.isCopy = []
 
+        # for bottom up coverage penalty
+        self.prev_attn_sum = None
+
+        if length_penalty == 'avg':
+            def avg_panelty(cur_length, now_acc_score):
+                p = cur_length.unsqueeze(1).expand_as(now_acc_score)
+                return p
+            self.length_penalty_func = avg_panelty
+        elif length_penalty == 'wu':
+            def wu_penaty(cur_length, now_acc_score):
+                p = torch.pow((5 + cur_length.unsqueeze(1).expand_as(now_acc_score)) / 6, 0.9)
+                return p
+            self.length_penalty_func = wu_penaty
+        else:
+            raise ValueError('No length penalty given')
+
     # Get the outputs for the current timestep.
     def getCurrentState(self):
         return self.nextYs[-1]
@@ -57,6 +74,16 @@ class Beam(object):
     # Get the backpointers for the current timestep.
     def getCurrentOrigin(self):
         return self.prevKs[-1]
+
+    def get_bottom_up_coverage_penalty(self, attn):
+        if self.prev_attn_sum is None:
+            cov = attn
+        else:
+            cov = self.prev_attn_sum + attn
+        penalty = torch.max(cov, cov.clone().fill_(1.0)).sum(1)
+        penalty -= cov.size(1)
+        self.prev_attn_sum = cov
+        return penalty * 5
 
     #  Given prob over words for every last beam `wordLk` and attention
     #   `attnOut`: Compute and update the beam search.
@@ -79,7 +106,6 @@ class Beam(object):
                 wordLk.masked_fill_(finish_index.unsqueeze(1).expand_as(wordLk), -float('inf'))
                 for i in range(self.size):
                     if self.nextYs[-1][i] == s2s.Constants.EOS:
-                        # wordLk[i][s2s.Constants.EOS] = 0
                         wordLk[i][s2s.Constants.EOS] = 0
             # set up the current step length
             cur_length = self.all_length[-1]
@@ -87,10 +113,16 @@ class Beam(object):
                 cur_length[i] += 0 if self.nextYs[-1][i] == s2s.Constants.EOS else 1
 
         # Sum the previous scores.
+        if self.bottom_up_coverage_penalty:
+            bottom_up_coverage_penalty = self.get_bottom_up_coverage_penalty(attnOut)
+
         if len(self.prevKs) > 0:
             prev_score = self.all_scores[-1]
             now_acc_score = wordLk + prev_score.unsqueeze(1).expand_as(wordLk)
-            beamLk = now_acc_score / cur_length.unsqueeze(1).expand_as(now_acc_score)
+            length_penalty = self.length_penalty_func(cur_length, now_acc_score)
+            beamLk = now_acc_score / length_penalty
+            if self.bottom_up_coverage_penalty:
+                beamLk -= bottom_up_coverage_penalty.unsqueeze(1)
         else:
             self.all_length.append(self.tt.FloatTensor(self.size).fill_(1))
             # beamLk = wordLk[0]
@@ -112,6 +144,8 @@ class Beam(object):
         if len(self.prevKs) > 0:
             self.all_length.append(cur_length.index_select(0, prevK))
             self.all_scores.append(now_acc_score.view(-1).index_select(0, bestScoresId))
+            if self.bottom_up_coverage_penalty:
+                self.prev_attn_sum = self.prev_attn_sum.index_select(0, prevK)
         else:
             self.all_scores.append(self.scores)
 
@@ -156,4 +190,4 @@ class Beam(object):
             copyPos.append(self.nextYs_true[j + 1][k])
             k = self.prevKs[j][k]
 
-        return hyp[::-1],  isCopy[::-1], copyPos[::-1],torch.stack(attn[::-1])
+        return hyp[::-1],  isCopy[::-1], copyPos[::-1], torch.stack(attn[::-1])
