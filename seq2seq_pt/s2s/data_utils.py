@@ -1,7 +1,7 @@
 import s2s
 
 
-def src_to_ids(words, vocab):
+def src_to_ids(words, vocab: s2s.Dict):
     ids = []
     oovs = []
     for w in words:
@@ -16,7 +16,7 @@ def src_to_ids(words, vocab):
     return ids, oovs
 
 
-def tgt_to_ids(words, vocab, src_oovs, bosWord=None, eosWord=None):
+def tgt_to_ids(words, vocab: s2s.Dict, src_oovs, bosWord=None, eosWord=None):
     ids = []
     if bosWord is not None:
         ids.append(vocab.lookup(bosWord))

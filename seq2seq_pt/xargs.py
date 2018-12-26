@@ -29,14 +29,17 @@ def add_data_options(parser):
     parser.add_argument('-lower_input', action="store_true",
                         help="Lower case all the input. Default is False")
 
-    parser.add_argument('-max_src_length', type=int, default=100,
+    parser.add_argument('-max_src_length', type=int, default=400,
                         help='Maximum source sentence length.')
     parser.add_argument('-max_tgt_length', type=int, default=100,
                         help='Maximum source sentence length.')
     parser.add_argument('-truncate_sentence', action="store_true",
                         help='Truncate long sentence if set ')
 
-    # Test options
+    # Test during training options
+    parser.add_argument('-test_during_training', action="store_true",
+                        help="Decode on the dev set to report final evaluation scores.")
+    parser.add_argument('-dev_batch_size', type=int, default=1)
     parser.add_argument('-dev_input_src',
                         help='Path to the dev input file.')
     parser.add_argument('-dev_ref',
@@ -45,6 +48,9 @@ def add_data_options(parser):
                         help='Beam size')
     parser.add_argument('-max_sent_length', type=int, default=100,
                         help='Maximum output sentence length during testing.')
+    parser.add_argument('-coverage_penalty', action="store_true")
+    parser.add_argument('-length_penalty')
+    parser.add_argument('-min_decode_len', type=int, default=0)
 
 
 def add_model_options(parser):
@@ -130,6 +136,8 @@ def add_train_options(parser):
                         help="""evaluate on dev per x batches.""")
     parser.add_argument('-halve_lr_bad_count', type=int, default=6,
                         help="""evaluate on dev per x batches.""")
+    parser.add_argument('-tune_direction', required=True,
+                        help=" + or -, must given")
 
     # pretrained word vectors
     parser.add_argument('-pre_word_vecs_enc',
@@ -157,3 +165,39 @@ def add_train_options(parser):
 
     parser.add_argument('-log_home', default='',
                         help="""log home""")
+
+
+def add_translate_options(parser):
+    parser.add_argument('-model', required=True,
+                        help='Path to model .pt file')
+    parser.add_argument('-src', required=True,
+                        help='Source sequence to decode (one line per sequence)')
+    parser.add_argument('-tgt',
+                        help='True target sequence (optional)')
+    parser.add_argument('-output', default='pred.txt',
+                        help="""Path to output the predictions (each line will
+                        be the decoded sequence""")
+    parser.add_argument('-beam_size', type=int, default=12,
+                        help='Beam size')
+    parser.add_argument('-batch_size', type=int, default=64,
+                        help='Batch size')
+    parser.add_argument('-max_sent_length', type=int, default=400,
+                        help='Maximum sentence length.')
+    parser.add_argument('-length_penalty')
+    parser.add_argument('-coverage_penalty', action="store_true")
+    parser.add_argument('-min_decode_len', type=int, default=0)
+    parser.add_argument('-replace_unk', action="store_true",
+                        help="""Replace the generated UNK tokens with the source
+                        token that had the highest attention weight. If phrase_table
+                        is provided, it will lookup the identified source token and
+                        give the corresponding target token. If it is not provided
+                        (or the identified source token does not exist in the
+                        table) then it will copy the source token""")
+    parser.add_argument('-verbose', action="store_true",
+                        help='logger.info scores and predictions for each sentence')
+    parser.add_argument('-n_best', type=int, default=1,
+                        help="""If verbose is set, will output the n_best
+                        decoded sentences""")
+
+    parser.add_argument('-gpu', type=int, default=-1,
+                        help="Device to run on")

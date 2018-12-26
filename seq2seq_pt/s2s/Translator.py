@@ -1,7 +1,8 @@
-import s2s
-import torch.nn as nn
+from typing import List
 import torch
-from torch.autograd import Variable
+import torch.nn as nn
+
+import s2s
 from s2s.data_utils import src_to_ids, tgt_to_ids
 
 try:
@@ -11,7 +12,7 @@ except ImportError:
 
 
 class Translator(object):
-    def __init__(self, opt, model=None, dataset=None):
+    def __init__(self, opt, model=None, dicts=None):
         self.opt = opt
 
         if model is None:
@@ -45,8 +46,8 @@ class Translator(object):
 
             model.generator = generator
         else:
-            self.src_dict = dataset['dicts']['src']
-            self.tgt_dict = dataset['dicts']['tgt']
+            self.src_dict = dicts['src']
+            self.tgt_dict = dicts['tgt']
 
             self.enc_rnn_size = opt.enc_rnn_size
             self.dec_rnn_size = opt.dec_rnn_size
@@ -130,7 +131,7 @@ class Translator(object):
             cur_coverage = None
 
         beam = [s2s.Beam(beamSize, self.tgt_dict.size(), bottom_up_coverage_penalty=self.opt.coverage_penalty,
-                         length_penalty=self.opt.length_penalty,
+                         length_penalty=self.opt.length_penalty, min_len=self.opt.min_decode_len,
                          cuda=self.opt.cuda) for k in range(batchSize)]
         batchIdx = list(range(batchSize))
         remainingSents = batchSize
@@ -230,11 +231,11 @@ class Translator(object):
         n_best = self.opt.n_best
 
         for b in range(batchSize):
-            scores, ks = beam[b].sortBest()
+            scores, ks = beam[b].sort_finished()
 
             allScores += [scores[:n_best]]
             valid_attn = srcBatch.data[:, b].ne(s2s.Constants.PAD).nonzero().squeeze(1)
-            hyps, isCopy, copyPosition, attn = zip(*[beam[b].getHyp(k) for k in ks[:n_best]])
+            hyps, isCopy, copyPosition, attn = zip(*[beam[b].getHyp(time_step, k) for (time_step, k) in ks[:n_best]])
             attn = [a.index_select(1, valid_attn) for a in attn]
             allHyp += [hyps]
             allAttn += [attn]
@@ -270,3 +271,38 @@ class Translator(object):
             )
 
         return predBatch, predScore, None
+
+    def translate_src_tgt_batch(self, src_batch, tgt_batch):
+        res = []
+        predBatch, predScore, goldScore = self.translate(src_batch, tgt_batch)
+        for b in range(len(predBatch)):
+            res.append(" ".join(predBatch[b][0]))
+        return res
+
+    def translate_small_file(self, src_file_path: str, tgt_file_path: str = None) -> List[str]:
+        res = []
+        src_batch, tgt_batch = [], []
+
+        tgt_reader = open(tgt_file_path) if tgt_file_path else None
+        with open(src_file_path, encoding='utf-8') as src_reader:
+            for line in src_reader:
+                src_tokens = line.strip().split(' ')[:self.opt.max_src_length]
+                src_batch += [src_tokens]
+                if tgt_reader:
+                    tgt_tokens = tgt_reader.readline().split(' ') if tgt_reader else None
+                    tgt_batch += [tgt_tokens]
+
+                if len(src_batch) == self.opt.dev_batch_size:
+                    translated = self.translate_src_tgt_batch(src_batch, tgt_batch)
+                    res.extend(translated)
+                    src_batch, tgt_batch = [], []
+
+        if len(src_batch) > 0:
+            translated = self.translate_src_tgt_batch(src_batch, tgt_batch)
+            res.extend(translated)
+            src_batch, tgt_batch = [], []
+
+        if tgt_reader:
+            tgt_reader.close()
+
+        return res

@@ -171,3 +171,37 @@ def prepare_data_online(train_src, src_vocab, train_tgt, tgt_vocab):
                # 'valid': valid
                }
     return dataset
+
+
+def addPair(f1, f2):
+    for x, y1 in zip(f1, f2):
+        yield (x, y1)
+    yield (None, None)
+
+
+def load_dev_data(opt, translator, src_file, tgt_file):
+    dataset, raw = [], []
+    srcF = open(src_file, encoding='utf-8')
+    tgtF = open(tgt_file, encoding='utf-8')
+    src_batch, tgt_batch = [], []
+    for line, tgt in addPair(srcF, tgtF):
+        if (line is not None) and (tgt is not None):
+            src_tokens = line.strip().split(' ')
+            src_tokens = src_tokens[:opt.max_src_length]
+            src_batch += [src_tokens]
+            tgt_tokens = tgt.strip().split(' ')
+            tgt_batch += [tgt_tokens]
+
+            if len(src_batch) < opt.batch_size:
+                continue
+        else:
+            # at the end of file, check last batch
+            if len(src_batch) == 0:
+                break
+        data, src_oovs_data = translator.buildData(src_batch, tgt_batch)
+        dataset.append((data, src_oovs_data))
+        raw.append((src_batch, tgt_batch))
+        src_batch, tgt_batch = [], []
+    srcF.close()
+    tgtF.close()
+    return (dataset, raw)

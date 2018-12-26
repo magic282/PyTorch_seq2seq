@@ -92,10 +92,10 @@ class Decoder(nn.Module):
                                                         opt.att_vec_size, opt.use_coverage)
         self.dropout = nn.Dropout(opt.dropout)
         self.readout = nn.Linear((opt.enc_rnn_size + opt.dec_rnn_size + opt.word_vec_size), opt.dec_rnn_size)
-        self.maxout = s2s.modules.MaxOut(opt.maxout_pool_size)
-        self.maxout_pool_size = opt.maxout_pool_size
+        # self.maxout = s2s.modules.MaxOut(opt.maxout_pool_size)
+        # self.maxout_pool_size = opt.maxout_pool_size
 
-        self.copySwitch = nn.Linear(opt.enc_rnn_size + opt.dec_rnn_size, 1)
+        self.copySwitch = nn.Linear(opt.enc_rnn_size + opt.dec_rnn_size + opt.word_vec_size, 1)
 
         self.hidden_size = opt.dec_rnn_size
 
@@ -125,13 +125,14 @@ class Decoder(nn.Module):
             output, hidden = self.rnn(input_emb, hidden)
             cur_context, attn, coverage_acc, precompute = self.attn(output, context.transpose(0, 1), cur_coverage,
                                                                     precompute)
+            readout_input = torch.cat((emb_t, output, cur_context), dim=1)
+            copyProb = self.copySwitch(readout_input)
+            copyProb = torch.sigmoid(copyProb)
 
-            copyProb = self.copySwitch(torch.cat((output, cur_context), dim=1))
-            copyProb = F.sigmoid(copyProb)
-
-            readout = self.readout(torch.cat((emb_t, output, cur_context), dim=1))
-            maxout = self.maxout(readout)
-            output = self.dropout(maxout)
+            readout = self.readout(readout_input)
+            # maxout = self.maxout(readout)
+            # output = self.dropout(maxout)
+            output = self.dropout(readout)
             g_outputs += [output]
             c_outputs += [attn]
             copyGateOutputs += [copyProb]

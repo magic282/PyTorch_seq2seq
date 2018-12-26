@@ -26,7 +26,7 @@ class Optim(object):
             raise RuntimeError("Invalid optim method: " + self.method)
 
     def __init__(self, opt, method, lr, max_grad_norm, max_weight_value=None, lr_decay=1, start_decay_at=None,
-                 decay_bad_count=6, ):
+                 decay_bad_count=6, tune_direction='+'):
         self.opt = opt
         self.last_ppl = None
         self.lr = lr
@@ -40,8 +40,12 @@ class Optim(object):
         self.start_decay_at = start_decay_at
         self.start_decay = False
         self.decay_bad_count = decay_bad_count
-        self.best_metric = 0
         self.bad_count = 0
+        self.tune_direction = tune_direction
+        if self.tune_direction == '+':
+            self.best_metric = 0
+        else:
+            self.best_metric = 1e20
 
     def step(self):
         # Compute gradients norm.
@@ -64,11 +68,18 @@ class Optim(object):
         #     print("Decaying learning rate to %g" % self.lr)
 
         # self.last_ppl = ppl
-        if ppl >= self.best_metric:
-            self.best_metric = ppl
-            self.bad_count = 0
+        if self.tune_direction == '+':
+            if ppl >= self.best_metric:
+                self.best_metric = ppl
+                self.bad_count = 0
+            else:
+                self.bad_count += 1
         else:
-            self.bad_count += 1
+            if ppl <= self.best_metric:
+                self.best_metric = ppl
+                self.bad_count = 0
+            else:
+                self.bad_count += 1
         logger.info('Bad_count: {0}\tCurrent lr: {1}'.format(self.bad_count, self.lr))
         logger.info('Best metric: {0}'.format(self.best_metric))
 

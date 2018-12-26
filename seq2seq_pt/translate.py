@@ -6,6 +6,7 @@ import argparse
 import math
 import time
 import logging
+import xargs
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s:%(name)s]: %(message)s', level=logging.INFO)
 file_handler = logging.FileHandler(time.strftime("%Y%m%d-%H%M%S") + '.log.txt', encoding='utf-8')
@@ -14,39 +15,7 @@ logging.root.addHandler(file_handler)
 logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser(description='translate.py')
-
-parser.add_argument('-model', required=True,
-                    help='Path to model .pt file')
-parser.add_argument('-src', required=True,
-                    help='Source sequence to decode (one line per sequence)')
-parser.add_argument('-tgt',
-                    help='True target sequence (optional)')
-parser.add_argument('-output', default='pred.txt',
-                    help="""Path to output the predictions (each line will
-                    be the decoded sequence""")
-parser.add_argument('-beam_size', type=int, default=12,
-                    help='Beam size')
-parser.add_argument('-batch_size', type=int, default=64,
-                    help='Batch size')
-parser.add_argument('-max_sent_length', type=int, default=400,
-                    help='Maximum sentence length.')
-parser.add_argument('-length_penalty')
-parser.add_argument('-coverage_penalty', action="store_true")
-parser.add_argument('-replace_unk', action="store_true",
-                    help="""Replace the generated UNK tokens with the source
-                    token that had the highest attention weight. If phrase_table
-                    is provided, it will lookup the identified source token and
-                    give the corresponding target token. If it is not provided
-                    (or the identified source token does not exist in the
-                    table) then it will copy the source token""")
-parser.add_argument('-verbose', action="store_true",
-                    help='logger.info scores and predictions for each sentence')
-parser.add_argument('-n_best', type=int, default=1,
-                    help="""If verbose is set, will output the n_best
-                    decoded sentences""")
-
-parser.add_argument('-gpu', type=int, default=-1,
-                    help="Device to run on")
+xargs.add_translate_options(parser)
 
 
 def reportScore(name, scoreTotal, wordsTotal):

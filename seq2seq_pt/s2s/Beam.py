@@ -22,14 +22,20 @@ except ImportError:
 
 
 class Beam(object):
-    def __init__(self, size, vocab_size, bottom_up_coverage_penalty, length_penalty, cuda=False):
+    def __init__(self, size, vocab_size,
+                 bottom_up_coverage_penalty, length_penalty,
+                 min_len=0,
+                 cuda=False):
 
         self.size = size
         self.vocab_size = vocab_size
         self.bottom_up_coverage_penalty = bottom_up_coverage_penalty
         self.done = False
+        self.min_length = min_len
 
         self.tt = torch.cuda if cuda else torch
+
+        self.finished = []
 
         # The score for each translation on the beam.
         self.scores = self.tt.FloatTensor(size).zero_()
@@ -54,18 +60,18 @@ class Beam(object):
         # for bottom up coverage penalty
         self.prev_attn_sum = None
 
-        if length_penalty == 'avg':
-            def avg_panelty(cur_length, now_acc_score):
-                p = cur_length.unsqueeze(1).expand_as(now_acc_score)
-                return p
-            self.length_penalty_func = avg_panelty
-        elif length_penalty == 'wu':
-            def wu_penaty(cur_length, now_acc_score):
-                p = torch.pow((5 + cur_length.unsqueeze(1).expand_as(now_acc_score)) / 6, 0.9)
-                return p
-            self.length_penalty_func = wu_penaty
-        else:
-            raise ValueError('No length penalty given')
+        # if length_penalty == 'avg':
+        #     def avg_panelty(cur_length, now_acc_score):
+        #         p = cur_length.unsqueeze(1).expand_as(now_acc_score)
+        #         return p
+        #     self.length_penalty_func = avg_panelty
+        # elif length_penalty == 'wu':
+        #     def wu_penaty(cur_length, now_acc_score):
+        #         p = torch.pow((5 + cur_length.unsqueeze(1).expand_as(now_acc_score)) / 6, 0.9)
+        #         return p
+        #     self.length_penalty_func = wu_penaty
+        # else:
+        #     raise ValueError('No length penalty given')
 
     # Get the outputs for the current timestep.
     def getCurrentState(self):
@@ -98,38 +104,53 @@ class Beam(object):
         vocab_size = self.vocab_size
         numAll = wordLk.size(1)
 
-        # self.length += 1  # TODO: some is finished so do not acc length for them
-        if len(self.prevKs) > 0:
-            finish_index = self.nextYs[-1].eq(s2s.Constants.EOS)
-            if any(finish_index):
-                # wordLk.masked_fill_(finish_index.unsqueeze(1).expand_as(wordLk), -float('inf'))
-                wordLk.masked_fill_(finish_index.unsqueeze(1).expand_as(wordLk), -float('inf'))
-                for i in range(self.size):
-                    if self.nextYs[-1][i] == s2s.Constants.EOS:
-                        wordLk[i][s2s.Constants.EOS] = 0
-            # set up the current step length
-            cur_length = self.all_length[-1]
-            for i in range(self.size):
-                cur_length[i] += 0 if self.nextYs[-1][i] == s2s.Constants.EOS else 1
+        # # self.length += 1  # TODO: some is finished so do not acc length for them
+        # if len(self.prevKs) > 0:
+        #     finish_index = self.nextYs[-1].eq(s2s.Constants.EOS)
+        #     if any(finish_index):
+        #         # wordLk.masked_fill_(finish_index.unsqueeze(1).expand_as(wordLk), -float('inf'))
+        #         wordLk.masked_fill_(finish_index.unsqueeze(1).expand_as(wordLk), -float('inf'))
+        #         for i in range(self.size):
+        #             if self.nextYs[-1][i] == s2s.Constants.EOS:
+        #                 wordLk[i][s2s.Constants.EOS] = 0
+        #     # set up the current step length
+        #     cur_length = self.all_length[-1]
+        #     for i in range(self.size):
+        #         cur_length[i] += 0 if self.nextYs[-1][i] == s2s.Constants.EOS else 1
+
+        # force the output to be longer than self.min_length
+        cur_len = len(self.nextYs)
+        if cur_len < self.min_length:
+            for k in range(len(wordLk)):
+                wordLk[k][s2s.Constants.EOS] = -1e20
+
+        # # Sum the previous scores.
+        # if self.bottom_up_coverage_penalty:
+        #     bottom_up_coverage_penalty = self.get_bottom_up_coverage_penalty(attnOut)
+        #
+        # if len(self.prevKs) > 0:
+        #     prev_score = self.all_scores[-1]
+        #     now_acc_score = wordLk + prev_score.unsqueeze(1).expand_as(wordLk)
+        #     length_penalty = self.length_penalty_func(cur_length, now_acc_score)
+        #     beamLk = now_acc_score / length_penalty
+        #     if self.bottom_up_coverage_penalty:
+        #         beamLk -= bottom_up_coverage_penalty.unsqueeze(1)
+        # else:
+        #     self.all_length.append(self.tt.FloatTensor(self.size).fill_(1))
+        #     # beamLk = wordLk[0]
+        #     beamLk = wordLk[0]
 
         # Sum the previous scores.
-        if self.bottom_up_coverage_penalty:
-            bottom_up_coverage_penalty = self.get_bottom_up_coverage_penalty(attnOut)
-
         if len(self.prevKs) > 0:
-            prev_score = self.all_scores[-1]
-            now_acc_score = wordLk + prev_score.unsqueeze(1).expand_as(wordLk)
-            length_penalty = self.length_penalty_func(cur_length, now_acc_score)
-            beamLk = now_acc_score / length_penalty
-            if self.bottom_up_coverage_penalty:
-                beamLk -= bottom_up_coverage_penalty.unsqueeze(1)
+            beamLk = wordLk + self.scores.unsqueeze(1).expand_as(wordLk)
+            # Don't let EOS have children.
+            for i in range(self.nextYs[-1].size(0)):
+                if self.nextYs[-1][i] == s2s.Constants.EOS:
+                    beamLk[i] = -1e20
         else:
-            self.all_length.append(self.tt.FloatTensor(self.size).fill_(1))
-            # beamLk = wordLk[0]
             beamLk = wordLk[0]
 
         flatBeamLk = beamLk.view(-1)
-
         bestScores, bestScoresId = flatBeamLk.topk(self.size, 0, True, True)
         self.scores = bestScores
 
@@ -141,13 +162,13 @@ class Beam(object):
         isCopy = predict.ge(self.tt.LongTensor(self.size).fill_(self.vocab_size)).long()
         final_predict = predict * (1 - isCopy) + isCopy * s2s.Constants.UNK
 
-        if len(self.prevKs) > 0:
-            self.all_length.append(cur_length.index_select(0, prevK))
-            self.all_scores.append(now_acc_score.view(-1).index_select(0, bestScoresId))
-            if self.bottom_up_coverage_penalty:
-                self.prev_attn_sum = self.prev_attn_sum.index_select(0, prevK)
-        else:
-            self.all_scores.append(self.scores)
+        # if len(self.prevKs) > 0:
+        #     # self.all_length.append(cur_length.index_select(0, prevK))
+        #     # self.all_scores.append(now_acc_score.view(-1).index_select(0, bestScoresId))
+        #     if self.bottom_up_coverage_penalty:
+        #         self.prev_attn_sum = self.prev_attn_sum.index_select(0, prevK)
+        # else:
+        #     self.all_scores.append(self.scores)
 
         self.prevKs.append(prevK)
         self.nextYs.append(final_predict)
@@ -155,19 +176,27 @@ class Beam(object):
         self.isCopy.append(isCopy)
         self.attn.append(attnOut.index_select(0, prevK))
 
+        for i in range(self.nextYs[-1].size(0)):
+            if self.nextYs[-1][i] == s2s.Constants.EOS:
+                global_scores = self.scores / len(self.nextYs)
+                s = global_scores[i]
+                self.finished.append((s, len(self.nextYs) - 1, i))
+
         # End condition is when every one is EOS.
-        if all(self.nextYs[-1].eq(s2s.Constants.EOS)):
+        # if all(self.nextYs[-1].eq(s2s.Constants.EOS)):
+        #     self.done = True
+        # End condition is when top-of-beam is EOS and no global score.
+        if self.nextYs[-1][0] == s2s.Constants.EOS:
+            self.all_scores.append(self.scores)
             self.done = True
 
         return self.done
 
-    def sortBest(self):
-        return torch.sort(self.scores, 0, True)
-
-    # Get the score of the best in the beam.
-    def getBest(self):
-        scores, ids = self.sortBest()
-        return scores[1], ids[1]
+    def sort_finished(self):
+        self.finished.sort(key=lambda a: -a[0])
+        scores = [sc for sc, _, _ in self.finished]
+        ks = [(t, k) for _, t, k in self.finished]
+        return scores, ks
 
     # Walk back to construct the full hypothesis.
     #
@@ -179,11 +208,11 @@ class Beam(object):
     #
     #     1. The hypothesis
     #     2. The attention at each time step.
-    def getHyp(self, k):
+    def getHyp(self, time_step, k):
         hyp, attn = [], []
         isCopy, copyPos = [], []
         # print(len(self.prevKs), len(self.nextYs), len(self.attn))
-        for j in range(len(self.prevKs) - 1, -1, -1):
+        for j in range(len(self.prevKs[:time_step]) - 1, -1, -1):
             hyp.append(self.nextYs[j + 1][k])
             attn.append(self.attn[j][k])
             isCopy.append(self.isCopy[j][k])
