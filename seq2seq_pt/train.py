@@ -19,6 +19,7 @@ def init_train():
     xargs.add_data_options(parser)
     xargs.add_model_options(parser)
     xargs.add_train_options(parser)
+    xargs.add_dev_options(parser)
 
     opt = parser.parse_args()
 

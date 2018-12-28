@@ -6,8 +6,43 @@ except ImportError:
     pass
 
 
+def add_decode_options(parser):
+    parser.add_argument('-beam_size', type=int, default=12,
+                        help='Beam size')
+    parser.add_argument('-min_decode_length', type=int, default=0)
+    parser.add_argument('-max_decode_length', type=int, default=400,
+                        help='Maximum sentence length.')
+    parser.add_argument('-stepwise_penalty', action='store_true',
+                        help="""Apply penalty at every decoding step.
+                           Helpful for summary penalty.""")
+    parser.add_argument('-length_penalty', default='none',
+                        choices=['none', 'wu', 'avg'],
+                        help="""Length Penalty to use.""")
+    parser.add_argument('-coverage_penalty', default='none',
+                        choices=['none', 'wu', 'summary'],
+                        help="""Coverage Penalty to use.""")
+    parser.add_argument('-alpha', type=float, default=0.,
+                        help="""Google NMT length penalty parameter
+                            (higher = longer generation)""")
+    parser.add_argument('-beta', type=float, default=-0.,
+                        help="""Coverage penalty parameter""")
+
+
+def add_dev_options(parser):
+    # Test during training options
+    parser.add_argument('-test_during_training', action="store_true",
+                        help="Decode on the dev set to report final evaluation scores.")
+    parser.add_argument('-dev_batch_size', type=int, default=1)
+    parser.add_argument('-dev_input_src',
+                        help='Path to the dev input file.')
+    parser.add_argument('-dev_ref',
+                        help='Path to the dev reference file.')
+    parser.add_argument('-max_sent_length', type=int, default=100,
+                        help='Maximum output sentence length during testing.')
+    add_decode_options(parser)
+
+
 def add_data_options(parser):
-    ## Data options
     parser.add_argument('-save_path', default='',
                         help="""Model filename (the model will be saved as
                         <save_model>_epochN_PPL.pt where PPL is the
@@ -36,25 +71,8 @@ def add_data_options(parser):
     parser.add_argument('-truncate_sentence', action="store_true",
                         help='Truncate long sentence if set ')
 
-    # Test during training options
-    parser.add_argument('-test_during_training', action="store_true",
-                        help="Decode on the dev set to report final evaluation scores.")
-    parser.add_argument('-dev_batch_size', type=int, default=1)
-    parser.add_argument('-dev_input_src',
-                        help='Path to the dev input file.')
-    parser.add_argument('-dev_ref',
-                        help='Path to the dev reference file.')
-    parser.add_argument('-beam_size', type=int, default=12,
-                        help='Beam size')
-    parser.add_argument('-max_sent_length', type=int, default=100,
-                        help='Maximum output sentence length during testing.')
-    parser.add_argument('-coverage_penalty', action="store_true")
-    parser.add_argument('-length_penalty')
-    parser.add_argument('-min_decode_len', type=int, default=0)
-
 
 def add_model_options(parser):
-    ## Model options
     parser.add_argument('-layers', type=int, default=1,
                         help='Number of layers in the LSTM encoder/decoder')
     parser.add_argument('-enc_rnn_size', type=int, default=512,
@@ -83,7 +101,6 @@ def add_model_options(parser):
 
 
 def add_train_options(parser):
-    ## Optimization options
     parser.add_argument('-batch_size', type=int, default=64,
                         help='Maximum batch size')
     parser.add_argument('-max_generator_batches', type=int, default=32,
@@ -177,15 +194,9 @@ def add_translate_options(parser):
     parser.add_argument('-output', default='pred.txt',
                         help="""Path to output the predictions (each line will
                         be the decoded sequence""")
-    parser.add_argument('-beam_size', type=int, default=12,
-                        help='Beam size')
     parser.add_argument('-batch_size', type=int, default=64,
                         help='Batch size')
-    parser.add_argument('-max_sent_length', type=int, default=400,
-                        help='Maximum sentence length.')
-    parser.add_argument('-length_penalty')
-    parser.add_argument('-coverage_penalty', action="store_true")
-    parser.add_argument('-min_decode_len', type=int, default=0)
+
     parser.add_argument('-replace_unk', action="store_true",
                         help="""Replace the generated UNK tokens with the source
                         token that had the highest attention weight. If phrase_table
@@ -204,3 +215,4 @@ def add_translate_options(parser):
 
     parser.add_argument('-gpu', type=int, default=-1,
                         help="Device to run on")
+    add_decode_options(parser)

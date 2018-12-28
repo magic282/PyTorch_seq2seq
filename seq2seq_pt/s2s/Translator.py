@@ -61,6 +61,10 @@ class Translator(object):
         self.use_coverage = hasattr(self.model.decoder.attn, 'use_coverage') and self.model.decoder.attn.use_coverage
 
         self.copyCount = 0
+        self.scorer = s2s.GNMTGlobalScorer(opt.alpha,
+                                           opt.beta,
+                                           opt.coverage_penalty,
+                                           opt.length_penalty)
 
     def buildData(self, srcBatch, goldBatch):
         srcData = [self.src_dict.convertToIdx(b,
@@ -130,13 +134,15 @@ class Translator(object):
         else:
             cur_coverage = None
 
-        beam = [s2s.Beam(beamSize, self.tgt_dict.size(), bottom_up_coverage_penalty=self.opt.coverage_penalty,
-                         length_penalty=self.opt.length_penalty, min_len=self.opt.min_decode_len,
+        beam = [s2s.Beam(beamSize, self.tgt_dict.size(),
+                         global_scorer=self.scorer,
+                         stepwise_penalty=self.opt.stepwise_penalty,
+                         min_len=self.opt.min_decode_length,
                          cuda=self.opt.cuda) for k in range(batchSize)]
         batchIdx = list(range(batchSize))
         remainingSents = batchSize
 
-        for i in range(self.opt.max_sent_length):
+        for i in range(self.opt.max_decode_length):
             # Prepare decoder input.
             input = torch.stack([b.getCurrentState() for b in beam
                                  if not b.done]).transpose(0, 1).contiguous().view(1, -1)
@@ -176,7 +182,7 @@ class Translator(object):
                 idx = batchIdx[b]
                 if not beam[b].advance(log_extend_prob.data[idx], attn.data[idx]):
                     active += [b]
-                    father_idx.append(beam[b].prevKs[-1])  # this is very annoying
+                    father_idx.append(beam[b].prev_ks[-1])  # this is very annoying
 
             if not active:
                 break
@@ -236,7 +242,8 @@ class Translator(object):
             allScores += [scores[:n_best]]
             valid_attn = srcBatch.data[:, b].ne(s2s.Constants.PAD).nonzero().squeeze(1)
             try:
-                hyps, isCopy, copyPosition, attn = zip(*[beam[b].getHyp(time_step, k) for (time_step, k) in ks[:n_best]])
+                hyps, isCopy, copyPosition, attn = zip(
+                    *[beam[b].getHyp(time_step, k) for (time_step, k) in ks[:n_best]])
             except Exception:
                 print('a')
             attn = [a.index_select(1, valid_attn) for a in attn]

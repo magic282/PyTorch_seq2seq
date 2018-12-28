@@ -3,6 +3,6 @@ import s2s.Models
 from s2s.Dict import Dict
 from s2s.Dataset import Dataset
 from s2s.Optim import Optim
-from s2s.Beam import Beam
+from s2s.Beam import Beam, GNMTGlobalScorer
 from s2s.Translator import Translator
 from s2s.Trainer import Trainer
