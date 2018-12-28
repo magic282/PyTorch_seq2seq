@@ -31,7 +31,7 @@ class Translator(object):
             model = s2s.Models.NMTModel(encoder, decoder, decIniter)
 
             generator = nn.Sequential(
-                nn.Linear(model_opt.dec_rnn_size // model_opt.maxout_pool_size, self.tgt_dict.size()),
+                nn.Linear(model_opt.dec_rnn_size, self.tgt_dict.size()),
                 nn.Softmax())  # TODO pay attention here
 
             model.load_state_dict(checkpoint['model'])
@@ -231,11 +231,14 @@ class Translator(object):
         n_best = self.opt.n_best
 
         for b in range(batchSize):
-            scores, ks = beam[b].sort_finished()
+            scores, ks = beam[b].sort_finished(n_best)
 
             allScores += [scores[:n_best]]
             valid_attn = srcBatch.data[:, b].ne(s2s.Constants.PAD).nonzero().squeeze(1)
-            hyps, isCopy, copyPosition, attn = zip(*[beam[b].getHyp(time_step, k) for (time_step, k) in ks[:n_best]])
+            try:
+                hyps, isCopy, copyPosition, attn = zip(*[beam[b].getHyp(time_step, k) for (time_step, k) in ks[:n_best]])
+            except Exception:
+                print('a')
             attn = [a.index_select(1, valid_attn) for a in attn]
             allHyp += [hyps]
             allAttn += [attn]
@@ -279,11 +282,11 @@ class Translator(object):
             res.append(" ".join(predBatch[b][0]))
         return res
 
-    def translate_small_file(self, src_file_path: str, tgt_file_path: str = None) -> List[str]:
+    def translate_small_file(self, src_file_path: str, tgt_file_path: str = None, batch_size: int = 1) -> List[str]:
         res = []
         src_batch, tgt_batch = [], []
 
-        tgt_reader = open(tgt_file_path) if tgt_file_path else None
+        tgt_reader = open(tgt_file_path, 'r', encoding='utf-8') if tgt_file_path else None
         with open(src_file_path, encoding='utf-8') as src_reader:
             for line in src_reader:
                 src_tokens = line.strip().split(' ')[:self.opt.max_src_length]
@@ -292,7 +295,7 @@ class Translator(object):
                     tgt_tokens = tgt_reader.readline().split(' ') if tgt_reader else None
                     tgt_batch += [tgt_tokens]
 
-                if len(src_batch) == self.opt.dev_batch_size:
+                if len(src_batch) == batch_size:
                     translated = self.translate_src_tgt_batch(src_batch, tgt_batch)
                     res.extend(translated)
                     src_batch, tgt_batch = [], []

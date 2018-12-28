@@ -190,7 +190,15 @@ class Beam(object):
 
         return self.done
 
-    def sort_finished(self):
+    def sort_finished(self, minimum=None):
+        if minimum is not None:
+            i = 0
+            # Add from beam until we have minimum outputs.
+            while len(self.finished) < minimum:
+                global_scores = self.scores / len(self.nextYs)
+                s = global_scores[i]
+                self.finished.append((s, len(self.nextYs) - 1, i))
+                i += 1
         self.finished.sort(key=lambda a: -a[0])
         scores = [sc for sc, _, _ in self.finished]
         ks = [(t, k) for _, t, k in self.finished]

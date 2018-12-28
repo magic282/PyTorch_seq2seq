@@ -199,5 +199,8 @@ def add_translate_options(parser):
                         help="""If verbose is set, will output the n_best
                         decoded sentences""")
 
+    parser.add_argument('-max_src_length', type=int, default=400,
+                        help='Maximum source sentence length.')
+
     parser.add_argument('-gpu', type=int, default=-1,
                         help="Device to run on")

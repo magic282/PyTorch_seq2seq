@@ -11,15 +11,16 @@ class Evaluator(object):
 
 
 class RougeEvaluator(Evaluator):
-    def __init__(self, src_file: str, ref_file: str, translator: s2s.Translator):
+    def __init__(self, src_file: str, ref_file: str, translator: s2s.Translator, batch_size: int):
         super(RougeEvaluator).__init__()
         self.src_file: str = src_file
         self.ref_file: str = ref_file
         self.rouge_calculator = Rouge.Rouge()
         self.translator = translator
+        self.batch_size = batch_size
 
     def evaluate(self):
-        system_outputs = self.translator.translate_small_file(self.src_file, self.ref_file)
+        system_outputs = self.translator.translate_small_file(self.src_file, self.ref_file, self.batch_size)
         refs = []
         with open(self.ref_file, 'w', encoding='utf-8') as reader:
             for line in reader:
@@ -31,11 +32,11 @@ class RougeEvaluator(Evaluator):
 
 
 class CNNDMRougeEvaluator(RougeEvaluator):
-    def __init__(self, src_file: str, ref_file: str, translator: s2s.Translator):
-        super().__init__(src_file, ref_file, translator)
+    def __init__(self, src_file: str, ref_file: str, translator: s2s.Translator, batch_size: int):
+        super().__init__(src_file, ref_file, translator, batch_size)
 
     def evaluate(self):
-        system_outputs = self.translator.translate_small_file(self.src_file, self.ref_file)
+        system_outputs = self.translator.translate_small_file(self.src_file, self.ref_file, self.batch_size)
         refs = []
         with open(self.ref_file, 'r', encoding='utf-8') as reader:
             for line in reader:

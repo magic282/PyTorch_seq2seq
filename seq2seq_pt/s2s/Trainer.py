@@ -29,6 +29,13 @@ class Trainer(object):
         self.num_epoch = 0
         self.num_batch = 0
         self.evaluator: s2s.Evaluator.Evaluator = None
+        self.is_philly = False
+        if 'PHILLY_JOB_ID' in os.environ:
+            logger.info('Trainer is running in Philly.')
+            self.is_philly = True
+            logger.info('All ENV:')
+            for k, v in os.environ.items():
+                logger.info('{0}: {1}'.format(k, v))
 
     def get_logger_and_opt(self):
         return self.logger, self.opt
@@ -103,7 +110,7 @@ class Trainer(object):
         self.model = model
         if opt.test_during_training:
             self.translator = s2s.Translator(opt, model, self.dicts)
-            self.evaluator = CNNDMRougeEvaluator(opt.dev_input_src, opt.dev_ref, self.translator)
+            self.evaluator = CNNDMRougeEvaluator(opt.dev_input_src, opt.dev_ref, self.translator, opt.dev_batch_size)
 
     def restore_model(self):
         """
@@ -275,6 +282,8 @@ class Trainer(object):
             if i % opt.log_interval == -1 % opt.log_interval:
                 report_string = stat.to_string(self.num_epoch, i, len(train_data), self.num_batch, start_time)
                 logger.info(report_string)
+                if self.is_philly:
+                    print('PROGRESS: {0:.2f}%'.format(100 * self.num_batch / (len(train_data) * opt.epochs)))
 
             if opt.test_during_training and self.num_batch % opt.eval_per_batch == -1 % opt.eval_per_batch \
                     and self.num_batch >= opt.start_eval_batch:
@@ -320,15 +329,18 @@ class Trainer(object):
             train_stat = self._train_one_epoch()
             logger.info('Train perplexity: %g' % train_stat.ppl())
             logger.info('Train accuracy: %g' % (train_stat.accuracy() * 100))
-            logger.info('Saving checkpoint for epoch {0}...'.format(epoch))
-            save_path = self.get_regular_epoch_dump_path()
-            self.save_model(save_path)
+
             if self.dev_data is not None:
                 dev_stat = self._forward_dev_set()
                 dev_ppl = dev_stat.ppl()
                 logger.info('Dev perplexity: %g' % dev_ppl)
                 logger.info('Dev accuracy: %g' % (dev_stat.accuracy() * 100))
-                logger.info('Saving checkpoint for epoch {0}...'.format(epoch))
+                logger.info('Saving dev checkpoint for epoch {0}...'.format(epoch))
                 save_path = self.get_dev_dump_path(dev_ppl)
                 self.save_model(save_path)
-                self.optim.updateLearningRate(dev_ppl, self.num_epoch)
+                if not opt.test_during_training:
+                    self.optim.updateLearningRate(dev_ppl, self.num_epoch)
+            else:
+                logger.info('Saving regular checkpoint for epoch {0}...'.format(epoch))
+                save_path = self.get_regular_epoch_dump_path()
+                self.save_model(save_path)

@@ -33,7 +33,7 @@ def main():
     src_file = opt.src
     ref_file = None if opt.tgt is None else opt.tgt
 
-    system_outputs = translator.translate_small_file(src_file, ref_file)
+    system_outputs = translator.translate_small_file(src_file, ref_file, opt.batch_size)
     with open(opt.output, 'w', encoding='utf-8') as writer:
         for line in system_outputs:
             writer.write(line.strip() + '\n')
