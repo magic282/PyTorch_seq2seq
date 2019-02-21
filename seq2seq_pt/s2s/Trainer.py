@@ -235,8 +235,9 @@ class Trainer(object):
             extended_src_batch, extended_tgt_batch, extended_vocab_size,
             model.generator, criterion)
         if opt.use_coverage:
-            coverage_loss = coverage_loss_function(all_coverage, all_attn, tgt_mask)
+            coverage_loss, report_coverage_loss, _ = coverage_loss_function(all_coverage, all_attn, tgt_mask)
             loss = loss + coverage_loss
+            res_loss = res_loss + report_coverage_loss
 
         if math.isnan(res_loss) or res_loss > 1e20:
             logger.info('catch NaN')
@@ -308,11 +309,11 @@ class Trainer(object):
         model.eval()
         criterion = nn.NLLLoss(size_average=False, reduce=False)
         stat = Statistics()
-        for i in range(len(train_data)):
-            self.num_batch += 1
-            batch = train_data[i][:-1]  # exclude original indices
-            loss, loss_value, num_words, num_src_words, num_correct = self._forward_one_batch(batch, criterion)
-            stat.update(loss_value, num_src_words, num_words, num_correct)
+        with torch.no_grad():
+            for i in range(len(train_data)):
+                batch = train_data[i][:-1]  # exclude original indices
+                loss, loss_value, num_words, num_src_words, num_correct = self._forward_one_batch(batch, criterion)
+                stat.update(loss_value, num_src_words, num_words, num_correct)
         return stat
 
     def train(self):

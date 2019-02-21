@@ -50,6 +50,7 @@ def generate_copy_loss_function(g_outputs, c_gate_values, c_outputs, g_targets, 
 
     total_loss = torch.sum(loss)
     report_loss = total_loss.item()
+    total_loss = total_loss / torch.sum((1-tgt_mask))
     return total_loss, report_loss, 0
 
 
@@ -60,5 +61,7 @@ def coverage_loss_function(all_coverage, all_attn, tgt_mask):
     loss = torch.sum(loss, 2)
     loss = loss * (1 - tgt_mask)
     loss = torch.sum(loss)
+    report_loss = loss.item()
+    loss = loss / torch.sum((1 - tgt_mask))
 
-    return loss
+    return loss, report_loss, 0

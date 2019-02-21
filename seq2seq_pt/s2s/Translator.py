@@ -208,12 +208,13 @@ class Translator(object):
             context = updateActive(context, self.enc_rnn_size)
             att_vec = updateActive(att_vec, self.enc_rnn_size)
             padMask = padMask.index_select(1, activeIdx)
-            extend_zeros = extend_zeros.view(beamSize, remainingSents, -1)
-            extend_zeros = extend_zeros.index_select(1, activeIdx)
-            extend_zeros = extend_zeros.view(-1, extend_zeros.size(2))
-            extended_src_batch = extended_src_batch.view(beamSize, remainingSents, -1)
-            extended_src_batch = extended_src_batch.index_select(1, activeIdx)
-            extended_src_batch = extended_src_batch.view(-1, extended_src_batch.size(2))
+            if extended_vocab_size > 0:
+                extend_zeros = extend_zeros.view(beamSize, remainingSents, -1)
+                extend_zeros = extend_zeros.index_select(1, activeIdx)
+                extend_zeros = extend_zeros.view(-1, extend_zeros.size(2))
+                extended_src_batch = extended_src_batch.view(beamSize, remainingSents, -1)
+                extended_src_batch = extended_src_batch.index_select(1, activeIdx)
+                extended_src_batch = extended_src_batch.view(-1, extended_src_batch.size(2))
             if self.use_coverage:
                 cur_coverage = coverage.view(beamSize, remainingSents, -1)
                 cur_coverage = cur_coverage.index_select(1, activeIdx)
@@ -241,11 +242,8 @@ class Translator(object):
 
             allScores += [scores[:n_best]]
             valid_attn = srcBatch.data[:, b].ne(s2s.Constants.PAD).nonzero().squeeze(1)
-            try:
-                hyps, isCopy, copyPosition, attn = zip(
-                    *[beam[b].getHyp(time_step, k) for (time_step, k) in ks[:n_best]])
-            except Exception:
-                print('a')
+            hyps, isCopy, copyPosition, attn = zip(
+                *[beam[b].getHyp(time_step, k) for (time_step, k) in ks[:n_best]])
             attn = [a.index_select(1, valid_attn) for a in attn]
             allHyp += [hyps]
             allAttn += [attn]
@@ -266,7 +264,8 @@ class Translator(object):
         src, extend, tgt, indices = dataset[0]
 
         #  (2) translate
-        pred, predScore, predIsCopy, predCopyPosition, attn, _ = self.translateBatch(src, extend, tgt)
+        with torch.no_grad():
+            pred, predScore, predIsCopy, predCopyPosition, attn, _ = self.translateBatch(src, extend, tgt)
         pred, predScore, predIsCopy, predCopyPosition, attn = list(zip(
             *sorted(zip(pred, predScore, predIsCopy, predCopyPosition, attn, indices),
                     key=lambda x: x[-1])))[:-1]

@@ -40,9 +40,7 @@ class ConcatAttentionCoverage(nn.Module):
         targetT = self.linear_q(input).unsqueeze(1)  # batch x 1 x att_dim
         tmp10 = precompute + targetT.expand_as(precompute)  # batch x sourceL x att_dim
         if self.use_coverage:
-            coverage_score = coverage_acc.view(-1, 1)  # (batch x sourceL, 1)
-            coverage_score = self.linear_cov(coverage_score)  # (batch x sourceL, att_dim)
-            tmp10 = tmp10 + coverage_score.view_as(tmp10)  # (batch, sourceL, att_dim)
+            tmp10 = tmp10 + self.linear_cov(coverage_acc.view(-1, 1)).view_as(tmp10)
         tmp20 = torch.tanh(tmp10)  # (batch, sourceL, att_dim)
         energy = self.linear_v(tmp20.view(-1, tmp20.size(2))).view(tmp20.size(0), tmp20.size(1))  # batch x sourceL
         if self.mask is not None:
